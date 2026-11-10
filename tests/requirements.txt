@@ -1,0 +1,8 @@
+# The functional suite's direct dependencies. Exact pins only; the resolved
+# set with hashes lives in requirements.lock. Regenerate it with `pubkit lock`.
+-r requirements-pubkit.txt
+-r ../requirements.in
+# `make functional` measures the suite.
+coverage==7.16.2
+# FastAPI's test client.
+httpx==0.28.1

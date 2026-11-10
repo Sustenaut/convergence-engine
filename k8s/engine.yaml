@@ -1,0 +1,129 @@
+# The engine: one process with the pages and the rounds (convergence.main). Nothing
+# reaches it but oauth2-proxy (oauth2-proxy.yaml): admin/network-policy.yaml lets in
+# only the proxy's pods, and the ingress routes only to the proxy.
+#
+# Its credentials are files, never environment variables: the GitHub App's three
+# values (Secret convergence-github-app, which the deploy walk fills from Bitwarden),
+# the storage token (projected, renewed by the kubelet), and a Bitwarden read-only
+# machine account's token (Secret convergence-bitwarden, optional: without it the
+# bitwarden.* needs are unknown). The clones, the launchers' wheels and uv's cache are
+# in /work, the claim engine-work (k3s's local-path), so a restart or a new image
+# refreshes the clones and fetches no wheel it already has.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engine-work
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engine
+spec:
+  selector:
+    app: convergence-engine
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine
+spec:
+  replicas: 1
+  # One engine walks at a time: two pods would walk every service twice.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: convergence-engine
+  template:
+    metadata:
+      labels:
+        app: convergence-engine
+    spec:
+      serviceAccountName: app
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: engine
+          image: ghcr.io/sustenaut/convergence-engine
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: CONVERGENCE_SERVE
+              value: "1"
+            - name: CONVERGENCE_WORK
+              value: /work
+            - name: HOME
+              value: /work/home
+            - name: CONVERGENCE_STORAGE_TOKEN_FILE
+              value: /var/run/secrets/storage/token
+            - name: CONVERGENCE_GITHUB_APP_DIR
+              value: /var/run/secrets/github-app
+            - name: CONVERGENCE_BITWARDEN_TOKEN_FILE
+              value: /var/run/secrets/bitwarden/read-token
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            - name: storage-token
+              mountPath: /var/run/secrets/storage
+              readOnly: true
+            - name: github-app
+              mountPath: /var/run/secrets/github-app
+              readOnly: true
+            - name: bitwarden
+              mountPath: /var/run/secrets/bitwarden
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          # Not a liveness probe: a slow round is the engine working, and its health
+          # says when rounds stop ending, which observability notices from its calls.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: work
+          persistentVolumeClaim:
+            claimName: engine-work
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: storage-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: storage.sustenaut.eu
+                  path: token
+                  expirationSeconds: 3600
+        - name: github-app
+          secret:
+            secretName: convergence-github-app
+        - name: bitwarden
+          secret:
+            secretName: convergence-bitwarden
+            optional: true

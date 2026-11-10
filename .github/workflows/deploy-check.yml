@@ -1,0 +1,8 @@
+# Seeded by pubdeploy 0.2.0: this repository's own. Every 30 minutes, the deploy walk, read-only.
+name: deploy-check
+on: { schedule: [{ cron: '*/30 * * * *' }], workflow_dispatch: {} }
+permissions: { actions: read, contents: read, id-token: write }
+jobs:
+  check:
+    uses: Sustenaut/pubdeploy/.github/workflows/deploy-check.yml@2df756eb5916723abb2d9fac9e3fd58e67693877 # v0.2.0
+    secrets: inherit

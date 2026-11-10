@@ -1,0 +1,96 @@
+{
+  "uses": [
+    {
+      "plugin": "bitwarden.secrets",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "src/convergence/walker.py",
+        "with-secrets.json"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.actions-oidc",
+      "paths": [
+        ".github/workflows/deploy-check.yml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.app-token",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "src/convergence/main.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.ghcr",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "Dockerfile",
+        "k8s/engine.yaml",
+        "k8s/kustomization.yaml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.repo-ops",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "src/convergence/walker.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "letsencrypt.certs",
+      "paths": [
+        "k8s/ingress.yaml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "sonarcloud.scan",
+      "paths": [
+        ".github/workflows/main.yml",
+        ".github/workflows/pr.yml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "storage.api",
+      "paths": [
+        "src/convergence/main.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "tailscale.tailnet",
+      "paths": [
+        "pubkit.json"
+      ],
+      "mode": "required"
+    }
+  ],
+  "exclude": [
+    {
+      "path": "tests/steps/test_engine.py",
+      "reason": "Checks the walk's environment, with made-up tokens, against a faked pubdeploy"
+    }
+  ],
+  "own_hosts": [
+    "sustenaut.eu"
+  ],
+  "other_hosts": [
+    {
+      "host": "dl.k8s.io",
+      "reason": "kubectl's release, pinned by sha256, in the image"
+    }
+  ],
+  "other_secrets": [
+    {
+      "name": "SUSTENAUT_DEPLOY_SSH_KEY",
+      "reason": "An SSH key to our own server"
+    }
+  ]
+}

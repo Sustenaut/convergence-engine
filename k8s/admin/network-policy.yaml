@@ -1,0 +1,21 @@
+# Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests need):
+# the deploy identity may not manage network policies. k3s enforces them (kube-router).
+# The engine holds the GitHub App and is behind the sign-in, so only the proxy's pods
+# may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: engine-only-from-proxy
+  namespace: convergence
+spec:
+  podSelector:
+    matchLabels:
+      app: convergence-engine
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: oauth2-proxy
+      ports:
+        - port: 8080
