@@ -49,7 +49,7 @@ provider() {
   fetch "$1" "$2" providers deploy.providers
   with+=(--with "$fetched")
 }
-provider https://github.com/Sustenaut/pubdeploy/releases/download/v0.2.0/pubdeploy-0.2.0-py3-none-any.whl 1aaf15c384a4e9d3b7ac95bec1c1a1f99b9612d105c982e22518f99867b644c0
+provider https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07
 provider https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl 88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17
 
 # pubkit's own wheel, by the sha256 tests/requirements.lock pins, from the mirror when GitHub fails.
