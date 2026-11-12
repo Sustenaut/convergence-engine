@@ -101,7 +101,7 @@ observability's `OBSERVABILITY_SENDERS`, so rounds that stop show as `sender_sil
 
 `scripts/go-live-convergence.sh` walks the steps before the engine's first walk of
 itself, from David's laptop: the GitHub App, its installation, the read-only machine
-account, then `./with-secrets ./pubdeploy walk --fulfil`, which applies `k8s/admin/`,
+account, then `./with-secrets ./pubdeploy walk --fulfil --server sustenaut` (the admin channel), which applies `k8s/admin/`,
 fills the Secrets, registers the sign-in client and opens the gate. After that the
 engine walks itself too.
 
