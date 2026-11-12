@@ -48,7 +48,12 @@
     "terraform": "https://storage.sustenaut.eu/terraform"
   },
   "deploy": {
-    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl", "sha256": "f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07"}, 
+    "providers": [
+      {
+        "distribution": "pubdeploy",
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl",
+        "sha256": "f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07"
+      },
       {
         "distribution": "pubsec",
         "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl",
@@ -181,6 +186,20 @@
         "variable": "INGEST_DATASETS",
         "path": "/convergence-engine",
         "value": "calls_convergence_engine"
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/integrations",
+        "variable": "INGEST_NEED_STATES",
+        "path": "/tenant",
+        "value": "need-states"
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/integrations",
+        "variable": "INGEST_NEED_STATES",
+        "path": "/dataset",
+        "value": "convergence"
       },
       {
         "type": "github.variable-entry",
