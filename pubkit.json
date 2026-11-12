@@ -205,7 +205,7 @@
         "type": "github.variable-entry",
         "repository": "Sustenaut/observability",
         "variable": "OBSERVABILITY_SENDERS",
-        "path": "/convergence-engine/engine",
+        "path": "/convergence_engine/engine",
         "value": "always"
       },
       {
