@@ -8,7 +8,7 @@
     "metadata": "read",
     "actions": "read",
     "secrets": "read",
-    "variables": "read",
+    "actions_variables": "read",
     "environments": "read"
   },
   "pubkit": {
