@@ -1,0 +1,30 @@
+# Builds the engine's image once CI passes on a merge to main, and sends k8s/ to the shared k3s
+# server over SSH and the tailnet, with pubdeploy's k8s-deploy.yml, where the deploy key can
+# only run sustenaut-deploy. It deploys only once DEPLOY_CONVERGENCE is "on", which the deploy
+# walk sets once every need before it is ready.
+name: deploy
+
+on:
+  # Once CI (main.yml) has passed on a merge to main, never beside it; k8s-deploy's
+  # ready job also waits for the integrations check on that commit.
+  workflow_run: { workflows: [main], types: [completed], branches: [main] }
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@e9b57bdac253b463d28e6e010594ffa7da32dee5 # v0.3.0
+    with:
+      image: ghcr.io/sustenaut/convergence-engine
+      deploys: k8s convergence DEPLOY_CONVERGENCE
+      # It starts as its own user, has its tools and dependencies, and serves nothing
+      # without its settings.
+      check: |
+        docker run --rm "$IMAGE" sh -c 'test "$(id -u)" = 1000'
+        docker run --rm "$IMAGE" sh -c 'kubectl version --client && kustomize version && gh --version && bws --version && uv --version && git --version'
+        docker run --rm "$IMAGE" python -c 'import integrations.clients.github_app_token, integrations.storage_sink, convergence.main as m; assert m.app is None'
+    secrets: inherit

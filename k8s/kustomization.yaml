@@ -1,0 +1,17 @@
+# The convergence engine on the shared k3s server, namespace convergence: the engine
+# (the pages and the rounds), and its sign-in proxy.
+# Rendered by .github/workflows/deploy.yml, which sets the image it just built, and
+# applied by sustenaut-deploy on the server. k8s/admin/ is applied by the deploy walk
+# over the admin channel (pubkit.json's k8s.manifests needs): the deploy identity may
+# not make cluster roles or network policies.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: convergence
+resources:
+  - service-accounts.yaml
+  - engine.yaml
+  - oauth2-proxy.yaml
+  - ingress.yaml
+images:
+  - name: ghcr.io/sustenaut/convergence-engine
+    newTag: unset

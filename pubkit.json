@@ -1,0 +1,217 @@
+{
+  "kind": "service",
+  "ci": {
+    "with": {
+      "setup": "make venv",
+      "test": "make functional",
+      "shellcheck": "scripts/*.sh",
+      "sonar-args": "-Dsonar.sources=src,k8s,Dockerfile -Dsonar.tests=tests"
+    }
+  },
+  "protect": {
+    "checks": [
+      "ci / passed",
+      "integrations / scan"
+    ],
+    "tags": false
+  },
+  "secrets": [
+    {
+      "from": "sustenaut-deploy-ssh-key",
+      "to": "SUSTENAUT_DEPLOY_SSH_KEY",
+      "kind": "secret"
+    },
+    {
+      "from": "TS_GH_OAUTH_CLIENT_ID",
+      "to": "TS_GH_OAUTH_CLIENT_ID",
+      "kind": "secret"
+    },
+    {
+      "from": "TS_GH_OAUTH_SECRET",
+      "to": "TS_GH_OAUTH_SECRET",
+      "kind": "secret"
+    },
+    {
+      "from": "sustenaut-server",
+      "to": "SUSTENAUT_SERVER",
+      "kind": "variable"
+    },
+    {
+      "from": "sustenaut-known-hosts",
+      "to": "SUSTENAUT_KNOWN_HOSTS",
+      "kind": "variable"
+    }
+  ],
+  "mirror": {
+    "wheels": "https://storage.sustenaut.eu/wheels",
+    "pypi": "https://storage.sustenaut.eu/pypi",
+    "terraform": "https://storage.sustenaut.eu/terraform"
+  },
+  "deploy": {
+    "providers": [
+      {
+        "distribution": "pubdeploy",
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl",
+        "sha256": "f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07"
+      },
+      {
+        "distribution": "pubsec",
+        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl",
+        "sha256": "88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17"
+      }
+    ],
+    "namespace": "convergence",
+    "host": "convergence.sustenaut.eu",
+    "workflow": "deploy.yml",
+    "gate": "DEPLOY_CONVERGENCE",
+    "needs": [
+      {
+        "type": "k8s.manifests",
+        "path": "k8s/admin/cluster-role.yaml"
+      },
+      {
+        "type": "k8s.manifests",
+        "path": "k8s/admin/secret-readers.yaml"
+      },
+      {
+        "type": "k8s.manifests",
+        "path": "k8s/admin/network-policy.yaml"
+      },
+      {
+        "type": "bitwarden.generated",
+        "name": "convergence-cookie-secret",
+        "shape": "oauth2-proxy-cookie",
+        "secret": {
+          "name": "convergence-page-secrets",
+          "key": "cookie-secret"
+        }
+      },
+      {
+        "type": "auth.sign-in-client",
+        "realm": "team",
+        "role": "convergence",
+        "auth": "https://auth.sustenaut.eu/realms/team",
+        "domain": "sustenaut.eu",
+        "host": "convergence.sustenaut.eu",
+        "state": "/root/.config/sustenaut-auth/team-sustenaut.eu",
+        "client_name": "sustenaut.eu team sites",
+        "register_app": "../auth/register-app.py",
+        "approvals": "../shared-infra/infra/auth-approvals.json",
+        "access": "https://auth.sustenaut.eu/realms/team/access",
+        "secret": {
+          "name": "convergence-oidc"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "convergence-app-id",
+        "secret": {
+          "name": "convergence-github-app",
+          "key": "app-id"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "convergence-app-key",
+        "secret": {
+          "name": "convergence-github-app",
+          "key": "app-key"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "convergence-installation-id",
+        "secret": {
+          "name": "convergence-github-app",
+          "key": "installation-id"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "convergence-bitwarden-read-token",
+        "secret": {
+          "name": "convergence-bitwarden",
+          "key": "read-token"
+        }
+      },
+      {
+        "type": "upstream",
+        "name": "storage",
+        "health": "https://storage.sustenaut.eu/"
+      },
+      {
+        "type": "upstream",
+        "name": "auth",
+        "health": "https://auth.sustenaut.eu/realms/team/.well-known/openid-configuration"
+      },
+      {
+        "type": "storage.tenant",
+        "name": "plane",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "read": [
+          "k8s:convergence/app"
+        ],
+        "write": [
+          "k8s:convergence/app"
+        ],
+        "private": true,
+        "heads": true
+      },
+      {
+        "type": "storage.tenant",
+        "name": "need-states",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "write": [
+          "k8s:convergence/app"
+        ],
+        "private": true,
+        "inbox": true
+      },
+      {
+        "type": "storage.tenant",
+        "name": "calls-convergence-engine",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "write": [
+          "k8s:convergence/app"
+        ],
+        "private": true,
+        "inbox": true
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/integrations",
+        "variable": "INGEST_DATASETS",
+        "path": "/convergence-engine",
+        "value": "calls_convergence_engine"
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/integrations",
+        "variable": "INGEST_NEED_STATES",
+        "path": "/tenant",
+        "value": "need-states"
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/integrations",
+        "variable": "INGEST_NEED_STATES",
+        "path": "/dataset",
+        "value": "convergence"
+      },
+      {
+        "type": "github.variable-entry",
+        "repository": "Sustenaut/observability",
+        "variable": "OBSERVABILITY_SENDERS",
+        "path": "/convergence-engine/engine",
+        "value": "always"
+      },
+      {
+        "type": "service.health",
+        "path": "/healthz"
+      }
+    ]
+  }
+}

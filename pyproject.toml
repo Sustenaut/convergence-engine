@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "convergence-engine"
+version = "0.1.0"
+description = "Walks every deploy service read-only every 30 minutes, shows each need's state, and journals the walks."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "David Schryer", email = "schryer@gmail.com" }]
+dependencies = [
+  "integrations[github-app,storage-sink] @ https://github.com/Sustenaut/integrations/releases/download/v0.14.1/integrations-0.14.1-py3-none-any.whl",
+  "fastapi",
+  "uvicorn",
+]
+
+[project.urls]
+Repository = "https://github.com/Sustenaut/convergence-engine"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.coverage.run]
+source = ["convergence"]
+parallel = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

@@ -1,0 +1,9 @@
+# What the image installs: the engine's dependencies, hash-locked into
+# requirements.lock (uv pip compile --generate-hashes --python-version 3.14 --universal
+# requirements.in -o requirements.lock).
+# The integrations library: Caller and the call log (storage-sink, which brings
+# fastavro, used for the need-state facts too), the storage client, and the GitHub
+# App's installation tokens (github-app, which signs with cryptography).
+integrations[github-app,storage-sink] @ https://github.com/Sustenaut/integrations/releases/download/v0.14.1/integrations-0.14.1-py3-none-any.whl
+fastapi==0.142.2
+uvicorn==0.54.0

@@ -1,0 +1,19 @@
+{
+  "name": "Sustenaut convergence",
+  "url": "https://convergence.sustenaut.eu",
+  "public": false,
+  "description": "The convergence engine's reads (step 4a): each deploy service's repository, its Actions secrets' and variables' names, its environments and its runs.",
+  "default_permissions": {
+    "contents": "read",
+    "metadata": "read",
+    "actions": "read",
+    "secrets": "read",
+    "variables": "read",
+    "environments": "read"
+  },
+  "pubkit": {
+    "org": "Sustenaut",
+    "bitwarden_project": "Sustenaut",
+    "secret_prefix": "convergence"
+  }
+}

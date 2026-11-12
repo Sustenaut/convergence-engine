@@ -1,0 +1,51 @@
+# The engine's reads in the cluster (step 4a): what a walk's checks look at, in every
+# namespace, as the ServiceAccount convergence/app (pubdeploy's plane channel). No
+# write, no delete, no exec, no nodes, and no Secret: those it reads only in the
+# namespaces secret-readers.yaml lists. Step 4b adds the writes the fulfils need, in a
+# reviewed change of its own.
+# Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: convergence-read
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, serviceaccounts, pods, pods/log, services, configmaps, events]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, replicasets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [cronjobs, jobs]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: convergence-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: convergence-read
+subjects:
+  - kind: ServiceAccount
+    name: app
+    namespace: convergence
+---
+# Reading Secrets, for the k8s.secret and k8s.secrets-declared checks (key names and
+# value lengths, never a value shown): granted per namespace, below, never cluster-wide,
+# so kube-system's and the engine's own are out of reach.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: convergence-secret-read
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list]
