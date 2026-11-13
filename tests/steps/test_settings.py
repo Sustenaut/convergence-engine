@@ -80,6 +80,11 @@ def every(ctx: dict, seconds: int) -> None:
     assert settings(ctx["env"]).every_seconds == seconds
 
 
+@then(parsers.parse("the first round waits {seconds:d} seconds"))
+def first_round(ctx: dict, seconds: int) -> None:
+    assert settings(ctx["env"]).first_round_seconds == seconds
+
+
 @then("there is no Bitwarden token file")
 def no_bws(ctx: dict) -> None:
     assert settings(ctx["env"]).bitwarden_token is None

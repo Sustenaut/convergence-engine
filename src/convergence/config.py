@@ -34,6 +34,8 @@ class Settings:
     every_seconds: int
     # How long one service's walk may take.
     walk_seconds: int
+    # How long a new pod waits before its first round: its own deploy finishing.
+    first_round_seconds: int = 300
 
 
 def _slug(value: str, what: str) -> str:
@@ -67,4 +69,5 @@ def settings(env: Mapping[str, str]) -> Settings:
         bitwarden_token=Path(bitwarden) if bitwarden else None,
         work=Path(env.get("CONVERGENCE_WORK", "/work")),
         every_seconds=every * 60,
-        walk_seconds=int(env.get("CONVERGENCE_WALK_SECONDS", "600")))
+        walk_seconds=int(env.get("CONVERGENCE_WALK_SECONDS", "600")),
+        first_round_seconds=int(env.get("CONVERGENCE_FIRST_ROUND_SECONDS", "300")))

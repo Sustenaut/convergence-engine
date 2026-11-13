@@ -24,6 +24,7 @@ Feature: The services, and the engine's settings
     Then the state repositories are "Sustenaut/release-state"
     And Sustenaut's zones are in "Sustenaut/shared-infra"
     And a round comes every 1800 seconds
+    And the first round waits 300 seconds
     And there is no Bitwarden token file
 
   Scenario: Settings name more state repositories, and a token file
