@@ -111,7 +111,7 @@ Feature: Rounds of read-only walks
       | 5       | none  | healthy   |
       | 80      | none  | unhealthy |
       | 200     | 40    | healthy   |
-      | 200     | 75    | unhealthy |
+      | 200     | 80    | unhealthy |
 
   Scenario: Many services give a round more time before it counts as stuck
     Given a round listed 8 services

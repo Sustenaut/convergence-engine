@@ -160,11 +160,15 @@ class Engine:
         """A round has ended within a round's wait and the longest round this many
         services can take (each walk its whole budget), or the engine is that new."""
         walks = max(1, len(self.status.services))
-        allowed = 2 * self.settings.every_seconds + walks * self.settings.walk_seconds
+        allowed = (2 * self.settings.every_seconds + walks * self.settings.walk_seconds
+                   + self.settings.first_round_seconds)
         last = self.status.round_ended if self.status.round_ended is not None else self.started
         return self.clock() - last <= allowed
 
     def loop(self, stop: threading.Event) -> None:  # pragma: no cover - the pod's thread; round() is tested
+        # A new pod is usually a deploy of the engine, whose run is still finishing: walked
+        # at once, its own deploy.rollout and service.health would be judged mid-deploy.
+        stop.wait(self.settings.first_round_seconds)
         while not stop.is_set():
             began = self.clock()
             self.round()
