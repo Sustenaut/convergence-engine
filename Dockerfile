@@ -6,7 +6,7 @@
 #
 # A walk runs the walked repository's own ./pubdeploy (and ./pubsec), which fetch
 # their pinned wheels with uv and curl, render with kustomize, read the cluster with
-# kubectl as the pod's ServiceAccount, and read GitHub with gh. Each tool is a pinned
+# kubectl as the pod's ServiceAccount, read GitHub with gh, and resolve DNS with dig (dns.site). Each tool is a pinned
 # release, checked against its sha256; bws is there for ./pubsec run's reads.
 FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTHONPATH=/opt/convergence
@@ -14,7 +14,7 @@ ARG KUBECTL=v1.37.2 KUBECTL_SHA256=c04487523e7aa7d1493f7808174c899db93d7a9cf5753
 ARG KUSTOMIZE=5.8.3 KUSTOMIZE_SHA256=cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
 ARG GH=2.103.3 GH_SHA256=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
 ARG BWS=2.1.0 BWS_SHA256=ba8233c3a4aee5d43e3c73bbd04d99e9bc5aba13bbbfd06d89b073abe732b860
-RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates unzip bind9-dnsutils \
     && rm -rf /var/lib/apt/lists/* \
     && cd /tmp \
     && curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL}/bin/linux/amd64/kubectl" \
