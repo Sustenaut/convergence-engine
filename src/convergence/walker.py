@@ -57,6 +57,8 @@ class Credentials:
     bitwarden_token: str = ""
     # The Bitwarden write token's file, on the Fulfil path alone: pubsec reads it there.
     write_token_file: str = ""
+    # gcloud's credential file and configuration directory for this path (google.py).
+    google: tuple[tuple[str, str], ...] = ()
 
 
 def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None) -> list[str]:
@@ -76,6 +78,7 @@ def environment(base: Mapping[str, str], credentials: Credentials, by: str, cach
         env["BWS_ACCESS_TOKEN"] = credentials.bitwarden_token
     if credentials.write_token_file:
         env["PUBSEC_WRITE_TOKEN_FILE"] = credentials.write_token_file
+    env.update(dict(credentials.google))
     return env
 
 

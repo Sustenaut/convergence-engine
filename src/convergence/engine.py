@@ -87,6 +87,21 @@ class Engine:
         self._running = threading.Lock()
         self._walking: dict[str, threading.Lock] = {}  # one walk of a service at a time
         self._locks = threading.Lock()
+        self.google = self._google()
+
+    def _google(self) -> dict[str, tuple[tuple[str, str], ...]]:
+        """Each path's gcloud environment (google.py): read for rounds, write for a Fulfil."""
+        s = self.settings
+        if not (s.google_pool and s.google_reader and s.google_admin):
+            return {}
+        from .google import Path_, prepare as google_prepare
+        made = google_prepare(s.work, [Path_("read", f"{s.google_pool}/providers/read", s.google_reader,
+                                             s.google_read_token),
+                                       Path_("write", f"{s.google_pool}/providers/write", s.google_admin,
+                                             s.google_write_token)])
+        # A key the admin may not make: pubsec's fix names where its accounts are granted.
+        made["write"]["PUBSEC_GCP_KEYS_GRANTED_IN"] = "Sustenaut/shared-infra's infra/convergence-keys.tf"
+        return {k: tuple(sorted(v.items())) for k, v in made.items()}
 
     def walking(self, repository: str) -> threading.Lock:
         with self._locks:
@@ -95,7 +110,8 @@ class Engine:
     def credentials(self) -> Credentials:
         bitwarden = self.settings.bitwarden_token
         return Credentials(github_token=self.github_token(), storage_token=read_secret(self.settings.storage_token),
-                           bitwarden_token=read_secret(bitwarden) if bitwarden and bitwarden.is_file() else "")
+                           bitwarden_token=read_secret(bitwarden) if bitwarden and bitwarden.is_file() else "",
+                           google=self.google.get("read", ()))
 
     def services(self, token: str) -> list[str]:
         found: list[str] = []
@@ -202,7 +218,8 @@ class Engine:
             write = self.settings.bitwarden_write_token
             credentials = dataclasses.replace(
                 self.credentials(), github_token=self.fulfil_token(),
-                write_token_file=str(write) if write and write.is_file() else "")
+                write_token_file=str(write) if write and write.is_file() else "",
+                google=self.google.get("write", ()))
             clone = self.clones.refresh(job.repository, credentials.github_token)
             owner = job.repository.split("/")[0]
             zones = self.settings.zones.get(owner)

@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@47f6ad73411e2f95d17d2bdffcd448f1aa2d1032 # v0.3.2
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@3aff3f235b8fbc02f4d137d10ea09c5a98d8830b # v0.4.0
     with:
       image: ghcr.io/sustenaut/convergence-engine
       deploys: k8s convergence DEPLOY_CONVERGENCE
@@ -25,6 +25,6 @@ jobs:
       # without its settings.
       check: |
         docker run --rm "$IMAGE" sh -c 'test "$(id -u)" = 1000'
-        docker run --rm "$IMAGE" sh -c 'dig -v && kubectl version --client && kustomize version && gh --version && bws --version && uv --version && git --version'
+        docker run --rm "$IMAGE" sh -c 'dig -v && gcloud --version && kubectl version --client && kustomize version && gh --version && bws --version && uv --version && git --version'
         docker run --rm "$IMAGE" python -c 'import integrations.clients.github_app_token, integrations.storage_sink, convergence.main as m; assert m.app is None'
     secrets: inherit

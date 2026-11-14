@@ -615,12 +615,12 @@ parse_type==0.6.6 \
 pluggy==1.7.0 \
     --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec \
     --hash=sha256:d1eaa46ebb595891b860ab086b4d09c8588af65ebd4361b8e8f4bb8920b90ba8
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.2/pubdeploy-0.3.2-py3-none-any.whl \
-    --hash=sha256:276f24bf553d6306744bb39ed180c1fe4203b139277220f4c15b56e83d7ea655
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.0/pubdeploy-0.4.0-py3-none-any.whl \
+    --hash=sha256:85d33414775c8d793f65001fb9e4b399f57aea4cb0c48c0e56aa5931b4f2ad8c
 pubkit @ https://github.com/Sustenaut/pubkit/releases/download/v0.39.0/pubkit-0.39.0-py3-none-any.whl \
     --hash=sha256:8b1b91f15369e4e48367402e602ec664ec9c328a1e55e55bf7f457a8749202ab
-pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.2.0/pubsec-0.2.0-py3-none-any.whl \
-    --hash=sha256:adf9f8a1bb49d33e149a2b96e8f74874000867c5d677025a9dda1ccada8befd3
+pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.2.1/pubsec-0.2.1-py3-none-any.whl \
+    --hash=sha256:8556965437fe6486ac8df901644063c6ed86107ab09407f799ac392b6a3bab4f
 pycparser==3.12 \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
     --hash=sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6
