@@ -18,7 +18,6 @@ SENDER = "convergence-engine"
 
 def build():  # pragma: no cover - the pod's wiring, with real files and the network
     from integrations.calls import Caller, Network
-    from integrations.clients.github_app_token import AppToken
     from integrations.clients.storage import Storage
     from integrations.storage_sink import StorageSink
 
@@ -27,6 +26,7 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
     from .config import settings
     from .engine import Engine, prepare, read_secret
     from .page import create_app
+    from .tokens import Tokens
 
     s = settings(os.environ)
     prepare(s.work)
@@ -34,13 +34,14 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
     sink = StorageSink({REPO: DATASET}, transport=transport, token=lambda: read_secret(s.storage_token),
                        base_url=s.storage_url, sender=SENDER)
     caller = Caller(REPO, "engine", transport=transport, sink=sink)
-    app_token = AppToken(caller, read_secret(s.github_app / "app-id"), read_secret(s.github_app / "app-key"),
-                         read_secret(s.github_app / "installation-id"))
+    tokens = Tokens(caller, read_secret(s.github_app / "app-id"), read_secret(s.github_app / "app-key"),
+                    read_secret(s.github_app / "installation-id"))
     plane = Storage(caller, journals.TENANT, base_url=s.storage_url, token_file=s.storage_token,
                     user_agent=SENDER)
     base = {k: os.environ[k] for k in ("PATH", "HOME", "KUBERNETES_SERVICE_HOST", "KUBERNETES_SERVICE_PORT")
             if k in os.environ}
-    engine = Engine(s, Clones(s.work, base_env=base), app_token, plane.for_tenant(facts.TENANT), base_env=base)
+    engine = Engine(s, Clones(s.work, base_env=base), tokens.read, plane.for_tenant(facts.TENANT), base_env=base,
+                    fulfil_token=tokens.write)
     stop = threading.Event()
     threading.Thread(target=engine.loop, args=(stop,), daemon=True, name="rounds").start()
     return create_app(engine, journals.Journals(plane))

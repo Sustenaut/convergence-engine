@@ -36,6 +36,10 @@ class Settings:
     walk_seconds: int
     # How long a new pod waits before its first round: its own deploy finishing.
     first_round_seconds: int = 300
+    # The Bitwarden write token's file, which only a Fulfil's walk is given.
+    bitwarden_write_token: Path | None = None
+    # How long a Fulfil may take.
+    fulfil_seconds: int = 1200
 
 
 def _slug(value: str, what: str) -> str:
@@ -70,4 +74,6 @@ def settings(env: Mapping[str, str]) -> Settings:
         work=Path(env.get("CONVERGENCE_WORK", "/work")),
         every_seconds=every * 60,
         walk_seconds=int(env.get("CONVERGENCE_WALK_SECONDS", "600")),
-        first_round_seconds=int(env.get("CONVERGENCE_FIRST_ROUND_SECONDS", "300")))
+        first_round_seconds=int(env.get("CONVERGENCE_FIRST_ROUND_SECONDS", "300")),
+        bitwarden_write_token=Path(write) if (write := env.get("CONVERGENCE_BITWARDEN_WRITE_TOKEN_FILE", "")) else None,
+        fulfil_seconds=int(env.get("CONVERGENCE_FULFIL_SECONDS", "1200")))

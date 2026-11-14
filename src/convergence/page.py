@@ -7,16 +7,28 @@ and change nothing.
     /                                         every service, its units' counts
     /services/OWNER/NAME                      each unit's needs, and its walks
     /services/OWNER/NAME/walks/HASH           one walk's journal, from storage
+    POST /services/OWNER/NAME/fulfil          a person's Fulfil of one unit
+    /fulfils/ID                               what that Fulfil said, and how it ended
     /healthz                                  open: has a round ended lately
+
+A Fulfil is the one thing a page does. The person is oauth2-proxy's X-Forwarded-Email,
+which only the proxy can set (admin/network-policy.yaml lets nothing else reach the
+engine); the form carries a token made from that person, the service and the unit, and
+the request must come from this site's own page (Origin), so another site cannot make
+a signed-in browser press the button.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from html import escape
 from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .engine import Engine, Service
 from .journals import Journals
@@ -82,8 +94,32 @@ def _service_link(repository: str) -> str:
     return f'<a href="/services/{escape(repository)}">{escape(repository)}</a>'
 
 
-def create_app(engine: Engine, journals: Journals) -> FastAPI:
+def _fulfillable(document: dict[str, Any]) -> bool:
+    return any(n["grade"] == "auto" and n["state"] in ("missing", "drift") for n in document["needs"])
+
+
+def create_app(engine: Engine, journals: Journals, site: str = "https://convergence.sustenaut.eu",
+               key: bytes | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    key = key or secrets.token_bytes(32)  # a new pod's forms are made afresh
+
+    def token(actor: str, repository: str, unit: str) -> str:
+        return hmac.new(key, f"{actor}\n{repository}\n{unit}".encode(), hashlib.sha256).hexdigest()
+
+    def actor_of(request: Request) -> str:
+        actor = request.headers.get("x-forwarded-email", "").strip()
+        if not actor:
+            raise HTTPException(403, "no signed-in person: a Fulfil needs the team sign-in")
+        return actor
+
+    def button(request: Request, repository: str, unit: str) -> str:
+        actor = request.headers.get("x-forwarded-email", "").strip()
+        if not actor or engine.fulfil_token is None:
+            return ""
+        return (f'<form method="post" action="/services/{escape(repository)}/fulfil">'
+                f'<input type="hidden" name="unit" value="{escape(unit)}">'
+                f'<input type="hidden" name="token" value="{token(actor, repository, unit)}">'
+                f'<button>Fulfil the auto needs of {escape(unit)}</button> as {escape(actor)}</form>')
 
     def service(owner: str, name: str) -> Service:
         found = engine.status.services.get(f"{owner}/{name}")
@@ -110,13 +146,15 @@ def create_app(engine: Engine, journals: Journals) -> FastAPI:
                                                      "No service has the role deploy yet, or no round has run."))
 
     @app.get("/services/{owner}/{name}")
-    def page(owner: str, name: str) -> HTMLResponse:
+    def page(owner: str, name: str, request: Request) -> HTMLResponse:
         s = service(owner, name)
         body = f"<p class=missing>The latest try, {escape(s.tried_at)}, failed: {escape(s.failure)}</p>" \
             if s.failure else ""
         for document in s.last.documents if s.last else []:
             unit = document["service"]["unit"]
             body += f"<h2>Unit {escape(unit)}</h2>" + _needs(document)
+            if _fulfillable(document):
+                body += button(request, s.repository, unit)
             try:
                 walks = journals.history(s.repository, unit)
                 rows = [[f'<a href="/services/{escape(s.repository)}/walks/{escape(w["hash"])}">{escape(w["time"])}</a>',
@@ -140,5 +178,39 @@ def create_app(engine: Engine, journals: Journals) -> FastAPI:
         if document.get("service", {}).get("repository") != s.repository:
             raise HTTPException(404, "no such walk")
         return _page(f"{s.repository}, unit {document['service']['unit']}", _needs(document))
+
+    @app.post("/services/{owner}/{name}/fulfil")
+    async def fulfil(owner: str, name: str, request: Request):
+        s = service(owner, name)
+        actor = actor_of(request)
+        if request.headers.get("origin", "") != site:
+            raise HTTPException(403, "a Fulfil comes from this site's own page")
+        form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8", "replace")).items()}
+        unit = form.get("unit", "")
+        if not hmac.compare_digest(form.get("token", ""), token(actor, s.repository, unit)):
+            raise HTTPException(403, "the form has expired, or is someone else's: open the page again")
+        started = engine.fulfil(s.repository, unit, actor)
+        if isinstance(started, str):
+            return _page(f"{s.repository}, unit {unit}", f"<p class=missing>Not started: {escape(started)}</p>",
+                         status=409)
+        return RedirectResponse(f"/fulfils/{started.id}", status_code=303)
+
+    @app.get("/fulfils/{id_}")
+    def fulfilled(id_: str) -> HTMLResponse:
+        job = engine.status.fulfils.get(id_)
+        if job is None:
+            raise HTTPException(404, "no such fulfil")
+        said = job.walk.said if job.walk else []
+        state = ("<p>Running: this page reloads itself.</p>" if not job.done else
+                 f"<p class=missing>It did not finish: {escape(job.error)}</p>" if job.error else
+                 "<p class=ready>Done. Each unit's needs below are as the walk left them.</p>")
+        body = (f"<p>Asked by {escape(job.actor)} at {escape(job.started_at)}.</p>{state}"
+                f"<pre>{escape(chr(10).join(said))}</pre>"
+                + "".join(_needs(d) for d in (job.walk.documents if job.walk and job.done else []))
+                + f'<p><a href="/services/{escape(job.repository)}">Back to {escape(job.repository)}</a></p>')
+        page = _page(f"Fulfil of {job.repository}, unit {job.unit}", body)
+        if not job.done:  # no script: the browser reloads it
+            page.headers["Refresh"] = "5"
+        return page
 
     return app

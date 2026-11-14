@@ -3,7 +3,10 @@
     ./pubdeploy check --json --journal URL [--zones ../ZONES/pubkit.json]
     ./pubsec run -- ./pubdeploy check ...          with a Bitwarden read token
 
-`check` is a walk that cannot fulfil. The subprocess's environment is built
+`check` is a walk that cannot fulfil. A person's Fulfil (the page's button) runs
+`./pubdeploy walk --fulfil --yes --unit U` instead, the one place the Bitwarden
+write token's file (PUBSEC_WRITE_TOKEN_FILE) and the installation token that may
+write reach a walk. The subprocess's environment is built
 here from nothing: PATH, HOME, the cluster's address (so kubectl uses the
 pod's ServiceAccount: pubdeploy's plane channel, PUBKIT_PLANE), the
 installation token as GH_TOKEN, the storage token, who walked
@@ -52,10 +55,13 @@ class Credentials:
     github_token: str
     storage_token: str
     bitwarden_token: str = ""
+    # The Bitwarden write token's file, on the Fulfil path alone: pubsec reads it there.
+    write_token_file: str = ""
 
 
-def argv(zones: str | None, journal: str, through_pubsec: bool) -> list[str]:
-    command = ["./pubdeploy", "check", "--json", "--journal", journal]
+def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None) -> list[str]:
+    command = (["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", fulfil_unit] if fulfil_unit
+               else ["./pubdeploy", "check"]) + ["--json", "--journal", journal]
     if zones:
         command += ["--zones", f"../{zones}/pubkit.json"]
     return ["./pubsec", "run", "--", *command] if through_pubsec else command
@@ -68,6 +74,8 @@ def environment(base: Mapping[str, str], credentials: Credentials, by: str, cach
                 "UV_CACHE_DIR": str(cache / "uv"), "GIT_TERMINAL_PROMPT": "0"})
     if credentials.bitwarden_token:
         env["BWS_ACCESS_TOKEN"] = credentials.bitwarden_token
+    if credentials.write_token_file:
+        env["PUBSEC_WRITE_TOKEN_FILE"] = credentials.write_token_file
     return env
 
 
@@ -82,16 +90,19 @@ def documents(stdout: str) -> list[dict[str, Any]]:
 
 def walk(repository: str, clone: Path, zones: str | None, journal: str, credentials: Credentials, *,
          by: str = "schedule", base: Mapping[str, str], cache: Path, timeout: float,
-         runner: Runner = run, clock=time.monotonic, now=lambda: datetime.now(timezone.utc)) -> Walk:
+         runner: Runner = run, clock=time.monotonic, now=lambda: datetime.now(timezone.utc),
+         fulfil_unit: str | None = None) -> Walk:
     result = Walk(repository, now().strftime("%Y-%m-%dT%H:%M:%SZ"))
     if not (clone / "pubdeploy").is_file():
         result.error = "the repository has no ./pubdeploy: its pubkit sync has not run with a deploy block"
         return result
     through_pubsec = bool(credentials.bitwarden_token) and (clone / "pubsec").is_file()
     started = clock()
-    ran: Ran = runner(argv(zones, journal, through_pubsec), clone, environment(base, credentials, by, cache), timeout)
+    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit), clone,
+                      environment(base, credentials, by, cache), timeout)
     result.seconds = round(clock() - started, 3)
-    result.said = [line for line in ran.stderr.splitlines() if line.strip()][-12:]
+    # A fulfil's plan and what it did, as pubdeploy prints them (names and states, no value).
+    result.said = [line for line in ran.stderr.splitlines() if line.strip()][-60 if fulfil_unit else -12:]
     try:
         result.documents = documents(ran.stdout)
     except ValueError:

@@ -75,6 +75,10 @@
       },
       {
         "type": "k8s.manifests",
+        "path": "k8s/admin/write-role.yaml"
+      },
+      {
+        "type": "k8s.manifests",
         "path": "k8s/admin/network-policy.yaml"
       },
       {
@@ -132,6 +136,14 @@
         "secret": {
           "name": "convergence-bitwarden",
           "key": "read-token"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "convergence-bitwarden-write-token",
+        "secret": {
+          "name": "convergence-bitwarden-write",
+          "key": "write-token"
         }
       },
       {

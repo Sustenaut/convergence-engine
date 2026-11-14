@@ -2,14 +2,14 @@
   "name": "Sustenaut convergence",
   "url": "https://convergence.sustenaut.eu",
   "public": false,
-  "description": "The convergence engine's reads (step 4a): each deploy service's repository, its Actions secrets' and variables' names, its environments and its runs.",
+  "description": "The convergence engine: reads for its scheduled rounds (a token limited to read), and writes for a person's Fulfil from its page.",
   "default_permissions": {
     "contents": "read",
     "metadata": "read",
-    "actions": "read",
-    "secrets": "read",
-    "actions_variables": "read",
-    "environments": "read"
+    "actions": "write",
+    "secrets": "write",
+    "actions_variables": "write",
+    "environments": "write"
   },
   "pubkit": {
     "org": "Sustenaut",
