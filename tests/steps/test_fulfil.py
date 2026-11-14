@@ -233,6 +233,7 @@ def test_a_round_gets_the_read_paths_google_credential_alone(tmp_path):
     assert env["CLOUDSDK_CONFIG"] == str(tmp_path / "google" / "read" / "gcloud")
     assert env["CLOUDSDK_CORE_DISABLE_USAGE_REPORTING"] == "true"
     assert "gwrite" not in json.dumps(env) and "admin@" not in json.dumps(env)
+    assert "PUBSEC_GCP_KEYS_GRANTED_IN" not in env
 
 
 def test_a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_directory(tmp_path):
@@ -245,6 +246,7 @@ def test_a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_dire
     assert write["audience"].endswith("/providers/write")
     assert write["credential_source"] == {"file": str(tmp_path / "gwrite")}
     assert env["CLOUDSDK_CONFIG"] == str(tmp_path / "google" / "write" / "gcloud")
+    assert env["PUBSEC_GCP_KEYS_GRANTED_IN"].endswith("infra/convergence-keys.tf")
 
 
 def test_without_a_pool_no_walk_gets_a_google_credential(world):

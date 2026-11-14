@@ -99,6 +99,8 @@ class Engine:
                                              s.google_read_token),
                                        Path_("write", f"{s.google_pool}/providers/write", s.google_admin,
                                              s.google_write_token)])
+        # A key the admin may not make: pubsec's fix names where its accounts are granted.
+        made["write"]["PUBSEC_GCP_KEYS_GRANTED_IN"] = "Sustenaut/shared-infra's infra/convergence-keys.tf"
         return {k: tuple(sorted(v.items())) for k, v in made.items()}
 
     def walking(self, repository: str) -> threading.Lock:
