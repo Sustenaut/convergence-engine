@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@e9b57bdac253b463d28e6e010594ffa7da32dee5 # v0.3.0
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@47f6ad73411e2f95d17d2bdffcd448f1aa2d1032 # v0.3.2
     with:
       image: ghcr.io/sustenaut/convergence-engine
       deploys: k8s convergence DEPLOY_CONVERGENCE
