@@ -25,6 +25,6 @@ jobs:
       # without its settings.
       check: |
         docker run --rm "$IMAGE" sh -c 'test "$(id -u)" = 1000'
-        docker run --rm "$IMAGE" sh -c 'dig -v && kubectl version --client && kustomize version && gh --version && bws --version && uv --version && git --version'
+        docker run --rm "$IMAGE" sh -c 'dig -v && gcloud --version && kubectl version --client && kustomize version && gh --version && bws --version && uv --version && git --version'
         docker run --rm "$IMAGE" python -c 'import integrations.clients.github_app_token, integrations.storage_sink, convergence.main as m; assert m.app is None'
     secrets: inherit

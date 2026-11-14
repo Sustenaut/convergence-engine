@@ -40,6 +40,13 @@ class Settings:
     bitwarden_write_token: Path | None = None
     # How long a Fulfil may take.
     fulfil_seconds: int = 1200
+    # The Workload Identity pool for Google (projects/N/locations/global/workloadIdentityPools/P),
+    # its accounts and the pod's two projected tokens; no pool, no Google credential.
+    google_pool: str = ""
+    google_reader: str = ""
+    google_admin: str = ""
+    google_read_token: Path | None = None
+    google_write_token: Path | None = None
 
 
 def _slug(value: str, what: str) -> str:
@@ -76,4 +83,9 @@ def settings(env: Mapping[str, str]) -> Settings:
         walk_seconds=int(env.get("CONVERGENCE_WALK_SECONDS", "600")),
         first_round_seconds=int(env.get("CONVERGENCE_FIRST_ROUND_SECONDS", "300")),
         bitwarden_write_token=Path(write) if (write := env.get("CONVERGENCE_BITWARDEN_WRITE_TOKEN_FILE", "")) else None,
-        fulfil_seconds=int(env.get("CONVERGENCE_FULFIL_SECONDS", "1200")))
+        fulfil_seconds=int(env.get("CONVERGENCE_FULFIL_SECONDS", "1200")),
+        google_pool=env.get("CONVERGENCE_GOOGLE_POOL", ""),
+        google_reader=env.get("CONVERGENCE_GOOGLE_READER", ""),
+        google_admin=env.get("CONVERGENCE_GOOGLE_ADMIN", ""),
+        google_read_token=Path(env.get("CONVERGENCE_GOOGLE_READ_TOKEN_FILE", "/var/run/secrets/google-read/token")),
+        google_write_token=Path(env.get("CONVERGENCE_GOOGLE_WRITE_TOKEN_FILE", "/var/run/secrets/google-write/token")))

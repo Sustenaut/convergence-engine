@@ -36,6 +36,15 @@
       "mode": "required"
     },
     {
+      "plugin": "google.cloud",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "src/convergence/engine.py",
+        "src/convergence/google.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "letsencrypt.certs",
       "paths": [
         "k8s/ingress.yaml"
@@ -82,6 +91,18 @@
     {
       "host": "dl.k8s.io",
       "reason": "kubectl's release, pinned by sha256, in the image"
+    },
+    {
+      "host": "dl.google.com",
+      "reason": "gcloud's release archive, pinned by sha256, in the image"
+    },
+    {
+      "host": "sts.googleapis.com",
+      "reason": "gcloud trades the pod's projected token for a Google credential there (Workload Identity Federation)"
+    },
+    {
+      "host": "iamcredentials.googleapis.com",
+      "reason": "gcloud impersonates the key reader or key admin account there"
     }
   ],
   "other_secrets": [

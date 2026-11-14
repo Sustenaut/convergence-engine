@@ -171,3 +171,9 @@ def wheel_from(ctx: dict, url: str) -> None:
 @then("the PyPI package and every hash are as they were")
 def kept(ctx: dict) -> None:
     assert ctx["mirrored"].splitlines()[1:] == ctx["lock"].splitlines()[1:]
+
+
+@then(parsers.parse('the Google read token file is "{path}"'))
+def google_read(ctx: dict, path: str) -> None:
+    got = settings(ctx["env"])
+    assert got.google_read_token == Path(path) and got.google_pool.endswith("/convergence")

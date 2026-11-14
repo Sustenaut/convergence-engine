@@ -77,6 +77,13 @@ spec:
             # A Fulfil's walk alone gets this file's path: never a round's.
             - name: CONVERGENCE_BITWARDEN_WRITE_TOKEN_FILE
               value: /var/run/secrets/bitwarden-write/write-token
+            # Google, without a key (google.py; shared-infra's infra/convergence-keys.tf).
+            - name: CONVERGENCE_GOOGLE_POOL
+              value: projects/948171295184/locations/global/workloadIdentityPools/convergence
+            - name: CONVERGENCE_GOOGLE_READER
+              value: convergence-key-reader@sustenaut.iam.gserviceaccount.com
+            - name: CONVERGENCE_GOOGLE_ADMIN
+              value: convergence-key-admin@sustenaut.iam.gserviceaccount.com
           volumeMounts:
             - name: work
               mountPath: /work
@@ -93,6 +100,12 @@ spec:
               readOnly: true
             - name: bitwarden-write
               mountPath: /var/run/secrets/bitwarden-write
+              readOnly: true
+            - name: google-read
+              mountPath: /var/run/secrets/google-read
+              readOnly: true
+            - name: google-write
+              mountPath: /var/run/secrets/google-write
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
@@ -137,3 +150,19 @@ spec:
           secret:
             secretName: convergence-bitwarden-write
             optional: true
+        # Two tokens for Google, told apart by audience: a round's walks get the read one's
+        # credential, a Fulfil's the write one's.
+        - name: google-read
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: convergence-google-read
+                  path: token
+                  expirationSeconds: 3600
+        - name: google-write
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: convergence-google-write
+                  path: token
+                  expirationSeconds: 3600

@@ -83,3 +83,7 @@ Feature: The services, and the engine's settings
     When it is pointed at the mirrors
     Then the wheel comes from "https://storage.sustenaut.eu/wheels/f/<its sha256>/pkg-1.0-py3-none-any.whl"
     And the PyPI package and every hash are as they were
+
+  Scenario: The Google pool and the pod's two token files are settings
+    Given the setting CONVERGENCE_GOOGLE_POOL is "projects/1/locations/global/workloadIdentityPools/convergence"
+    Then the Google read token file is "/var/run/secrets/google-read/token"
