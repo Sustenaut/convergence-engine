@@ -20,15 +20,15 @@ ARG GCLOUD=593.0.0 GCLOUD_SHA256=42c32b7553c712f71fcf6f124546c0519437f53755f47f9
 RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates unzip bind9-dnsutils \
     && rm -rf /var/lib/apt/lists/* \
     && cd /tmp \
-    && curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL}/bin/linux/amd64/kubectl" \
+    && curl --proto =https --tlsv1.2 -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL}/bin/linux/amd64/kubectl" \
     && echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c - && install -m 755 kubectl /usr/local/bin/ \
-    && curl -fsSLo kustomize.tgz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE}/kustomize_v${KUSTOMIZE}_linux_amd64.tar.gz" \
+    && curl --proto =https --tlsv1.2 -fsSLo kustomize.tgz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE}/kustomize_v${KUSTOMIZE}_linux_amd64.tar.gz" \
     && echo "${KUSTOMIZE_SHA256}  kustomize.tgz" | sha256sum -c - && tar -xzf kustomize.tgz && install -m 755 kustomize /usr/local/bin/ \
-    && curl -fsSLo gh.tgz "https://github.com/cli/cli/releases/download/v${GH}/gh_${GH}_linux_amd64.tar.gz" \
+    && curl --proto =https --tlsv1.2 -fsSLo gh.tgz "https://github.com/cli/cli/releases/download/v${GH}/gh_${GH}_linux_amd64.tar.gz" \
     && echo "${GH_SHA256}  gh.tgz" | sha256sum -c - && tar -xzf gh.tgz && install -m 755 "gh_${GH}_linux_amd64/bin/gh" /usr/local/bin/ \
-    && curl -fsSLo bws.zip "https://github.com/bitwarden/sdk-sm/releases/download/bws-v${BWS}/bws-x86_64-unknown-linux-gnu-${BWS}.zip" \
+    && curl --proto =https --tlsv1.2 -fsSLo bws.zip "https://github.com/bitwarden/sdk-sm/releases/download/bws-v${BWS}/bws-x86_64-unknown-linux-gnu-${BWS}.zip" \
     && echo "${BWS_SHA256}  bws.zip" | sha256sum -c - && unzip -q bws.zip && install -m 755 bws /usr/local/bin/ \
-    && curl -fsSLo gcloud.tgz "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD}-linux-x86_64.tar.gz" \
+    && curl --proto =https --tlsv1.2 -fsSLo gcloud.tgz "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD}-linux-x86_64.tar.gz" \
     && echo "${GCLOUD_SHA256}  gcloud.tgz" | sha256sum -c - && tar -xzf gcloud.tgz -C /opt \
     && ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud \
     && rm -rf /tmp/*
