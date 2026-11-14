@@ -29,6 +29,27 @@ if ask "Run ./with-secrets ./pubdeploy walk --fulfil --server sustenaut now?"; t
   ./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
 fi
 
-step "Restart the engine, so it mounts the new Secret, then fulfil a missing auto need from its page."
-echo "   ssh root@sustenaut k3s kubectl -n convergence rollout restart deployment/engine"
+step "Prove the admission policy: the engine's writes are refused in kube-system and allowed in a service's namespace."
+if ask "Check over ssh root@sustenaut (server-side dry runs, which write nothing)?"; then
+  # shellcheck disable=SC2029  # the arguments are ours, expanded here on purpose
+  k() { ssh root@sustenaut k3s kubectl "$@"; }
+  k api-resources --api-group=admissionregistration.k8s.io -o name | grep -qx validatingadmissionpolicies.admissionregistration.k8s.io \
+    || { echo "go-live: this cluster has no ValidatingAdmissionPolicy (Kubernetes 1.30 or later): the policy does not hold" >&2; exit 1; }
+  as=(--as=system:serviceaccount:convergence:app)
+  probe='{"apiVersion":"v1","kind":"Secret","metadata":{"name":"convergence-probe"}}'
+  if denied=$(echo "$probe" | k "${as[@]}" -n kube-system create --dry-run=server -f - 2>&1); then
+    echo "go-live: the engine could create a Secret in kube-system: the policy does not hold" >&2; exit 1
+  fi
+  grep -q "the convergence engine writes nothing in the system namespaces" <<<"$denied" \
+    || { echo "go-live: kube-system refused the engine, but not by the policy: $denied" >&2; exit 1; }
+  echo "$probe" | k "${as[@]}" -n notifier create --dry-run=server -f - >/dev/null \
+    || { echo "go-live: the engine may not create a Secret in notifier: the write role is not applied" >&2; exit 1; }
+  echo "   kube-system refused by the policy; notifier allowed."
+fi
+
+step "Restart the engine, so it mounts the new Secret."
+if ask "Run ssh root@sustenaut k3s kubectl -n convergence rollout restart deployment/engine now?"; then
+  ssh root@sustenaut k3s kubectl -n convergence rollout restart deployment/engine
+  ssh root@sustenaut k3s kubectl -n convergence rollout status deployment/engine --timeout=180s
+fi
 echo "   Then on https://convergence.sustenaut.eu, a service with a missing k8s.secret or bitwarden.generated need: Fulfil."

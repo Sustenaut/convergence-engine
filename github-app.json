@@ -2,7 +2,7 @@
   "name": "Sustenaut convergence",
   "url": "https://convergence.sustenaut.eu",
   "public": false,
-  "description": "The convergence engine: reads for its scheduled rounds (a token limited to read), and writes for a person's Fulfil from its page.",
+  "description": "The convergence engine. Rounds mint a token limited to read. A person's Fulfil uses: actions write (deploy.rollout, service.health: dispatch the deploy workflow), secrets write (github.secret, github.deploy-settings), variables write (github.variable, github.gate), environments write (github.deploy-settings in an environment).",
   "default_permissions": {
     "contents": "read",
     "metadata": "read",

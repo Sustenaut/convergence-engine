@@ -222,7 +222,7 @@ class Engine:
             else:
                 job.error = result.error
         except Exception as e:  # noqa: BLE001 - said on the Fulfil's page; the walk lock is released below
-            job.error = f"the fulfil could not start ({type(e).__name__}: {e})"[:300]
+            job.error = f"the fulfil could not start ({type(e).__name__})"
         finally:
             job.done = True
             lock.release()
