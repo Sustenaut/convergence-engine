@@ -13,7 +13,9 @@ import threading
 
 REPO = "Sustenaut/convergence-engine"
 DATASET = "calls_convergence_engine"
-SENDER = "convergence-engine"
+# Its reports name it "engine", as observability expects it (OBSERVABILITY_SENDERS
+# convergence_engine/engine), and as its calls do (the Caller's app).
+SENDER = "engine"
 
 
 def build():  # pragma: no cover - the pod's wiring, with real files and the network
@@ -37,7 +39,7 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
     tokens = Tokens(caller, read_secret(s.github_app / "app-id"), read_secret(s.github_app / "app-key"),
                     read_secret(s.github_app / "installation-id"))
     plane = Storage(caller, journals.TENANT, base_url=s.storage_url, token_file=s.storage_token,
-                    user_agent=SENDER)
+                    user_agent="convergence-engine")
     base = {k: os.environ[k] for k in ("PATH", "HOME", "KUBERNETES_SERVICE_HOST", "KUBERNETES_SERVICE_PORT")
             if k in os.environ}
     engine = Engine(s, Clones(s.work, base_env=base), tokens.read, plane.for_tenant(facts.TENANT), base_env=base,
