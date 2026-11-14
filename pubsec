@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by pubkit 0.36.0: `pubkit sync` rewrites this file, and
+# Managed by pubkit 0.39.0: `pubkit sync` rewrites this file, and
 # `pubkit sync --check` fails when it differs.
 #
 # Run this repository's pinned pubsec, which holds what pubkit does not: a
@@ -9,7 +9,7 @@
 #   ./pubsec run -- terraform plan
 #   ./pubsec --version
 #
-# The release is deploy.providers' pubsec, or the oldest pubkit 0.36.0
+# The release is deploy.providers' pubsec, or the oldest pubkit 0.39.0
 # works with where it lists none, or an older one.
 # Its wheel is fetched once into the user's cache (from the wheel mirror,
 # when pubkit.json names one and GitHub fails) and checked against its
@@ -43,5 +43,5 @@ fetch() {
   fi
 }
 
-fetch https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl 88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17 providers deploy.providers
+fetch https://github.com/Sustenaut/pubsec/releases/download/v0.2.0/pubsec-0.2.0-py3-none-any.whl adf9f8a1bb49d33e149a2b96e8f74874000867c5d677025a9dda1ccada8befd3 providers deploy.providers
 exec uvx --from "$fetched" pubsec "$@"
