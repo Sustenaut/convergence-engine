@@ -74,6 +74,9 @@ spec:
               value: /var/run/secrets/github-app
             - name: CONVERGENCE_BITWARDEN_TOKEN_FILE
               value: /var/run/secrets/bitwarden/read-token
+            # A Fulfil's walk alone gets this file's path: never a round's.
+            - name: CONVERGENCE_BITWARDEN_WRITE_TOKEN_FILE
+              value: /var/run/secrets/bitwarden-write/write-token
           volumeMounts:
             - name: work
               mountPath: /work
@@ -87,6 +90,9 @@ spec:
               readOnly: true
             - name: bitwarden
               mountPath: /var/run/secrets/bitwarden
+              readOnly: true
+            - name: bitwarden-write
+              mountPath: /var/run/secrets/bitwarden-write
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
@@ -126,4 +132,8 @@ spec:
         - name: bitwarden
           secret:
             secretName: convergence-bitwarden
+            optional: true
+        - name: bitwarden-write
+          secret:
+            secretName: convergence-bitwarden-write
             optional: true

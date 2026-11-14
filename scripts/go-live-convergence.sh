@@ -23,8 +23,8 @@ step "Install the App on every repository with the role deploy, on shared-infra 
 echo "   On the App's installation page, choose those repositories. A service the App cannot reach shows as a failed clone on its page."
 ask "Done?" || { echo "go-live: install the App first, then run this again"; exit 1; }
 
-step "A Bitwarden machine account convergence-read, read-only on the project Sustenaut, its access token stored in Sustenaut as convergence-bitwarden-read-token."
-echo "   In Bitwarden Secrets Manager: Machine accounts, New, read access to Sustenaut only; then an access token,"
+step "A read-only Bitwarden access token for the engine, stored in Sustenaut as convergence-bitwarden-read-token."
+echo "   In Bitwarden Secrets Manager: a new access token on the read-only machine account (Claude Business OS),"
 echo "   pasted into a new secret convergence-bitwarden-read-token in Sustenaut. Without it, the walks show bitwarden.* needs unknown."
 ask "Done?" || echo "   Left for later: the engine walks without it."
 

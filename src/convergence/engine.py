@@ -6,6 +6,11 @@ changed), then each owner's zones repository, then each service's clone before i
 walk. A service whose clone or walk fails keeps its last good walk on its page, with
 the failure beside it; the round goes on to the next. One round at a time: a round
 asked for while one runs is not started.
+
+A Fulfil is one person's walk of one unit with --fulfil, from the page: never while
+the same service is being walked (by a round or another Fulfil), with the
+installation token that may write and the Bitwarden write token's file, which no
+round ever gets. The journal says who asked (PUBKIT_WALK_BY, their email).
 """
 
 from __future__ import annotations
@@ -37,11 +42,25 @@ class Service:
 
 
 @dataclass
+class Fulfil:
+    """One person's Fulfil of one unit: what it said, and how it ended."""
+    id: str
+    repository: str
+    unit: str
+    actor: str
+    started_at: str
+    done: bool = False
+    walk: Walk | None = None
+    error: str = ""
+
+
+@dataclass
 class Status:
     services: dict[str, Service] = field(default_factory=dict)
     round_started: float | None = None
     round_ended: float | None = None
     problem: str = ""  # a round that could not start: no token, no state
+    fulfils: dict[str, Fulfil] = field(default_factory=dict)
 
 
 def prepare(work: Path) -> None:
@@ -57,12 +76,21 @@ def read_secret(path: Path) -> str:
 class Engine:
     def __init__(self, settings: Settings, clones: Clones, github_token: Callable[[], str], buffer: Buffer | None,
                  *, base_env: Mapping[str, str], walker: Callable[..., Walk] = walk,
-                 log: Callable[[str], None] = print, clock: Callable[[], float] = time.time):
+                 log: Callable[[str], None] = print, clock: Callable[[], float] = time.time,
+                 fulfil_token: Callable[[], str] | None = None):
         self.settings, self.clones, self.github_token, self.buffer = settings, clones, github_token, buffer
         self.base_env, self.walker, self.log, self.clock = dict(base_env), walker, log, clock
+        # The installation token that may write: a Fulfil's alone. Rounds read with github_token.
+        self.fulfil_token = fulfil_token
         self.status = Status()
         self.started = clock()
         self._running = threading.Lock()
+        self._walking: dict[str, threading.Lock] = {}  # one walk of a service at a time
+        self._locks = threading.Lock()
+
+    def walking(self, repository: str) -> threading.Lock:
+        with self._locks:
+            return self._walking.setdefault(repository, threading.Lock())
 
     def credentials(self) -> Credentials:
         bitwarden = self.settings.bitwarden_token
@@ -129,9 +157,13 @@ class Engine:
             return
         # Read again for each walk: the kubelet renews the projected token, and a round is long.
         credentials = dataclasses.replace(credentials, storage_token=read_secret(self.settings.storage_token))
-        result = self.walker(service.repository, clone, zones, self.settings.storage_url, credentials, by=by,
-                             base=self.base_env, cache=self.settings.work / "cache",
-                             timeout=self.settings.walk_seconds)
+        with self.walking(service.repository):
+            result = self.walker(service.repository, clone, zones, self.settings.storage_url, credentials, by=by,
+                                 base=self.base_env, cache=self.settings.work / "cache",
+                                 timeout=self.settings.walk_seconds)
+        self._record(service, result)
+
+    def _record(self, service: Service, result: Walk) -> None:
         service.tried_at = result.started_at
         if not result.ok:
             service.failure = result.error
@@ -144,6 +176,58 @@ class Engine:
                              if counts.get(s))
             self.log(f"convergence: {service.repository} {document['service']['unit']}: {said or 'no needs'}")
             self._publish(document)
+
+    def fulfil(self, repository: str, unit: str, actor: str) -> Fulfil | str:
+        """Start a person's Fulfil of one unit, in its own thread; the Fulfil, or why not."""
+        service = self.status.services.get(repository)
+        if service is None or service.last is None:
+            return "that service has not been walked yet"
+        if unit not in {d["service"]["unit"] for d in service.last.documents}:
+            return "that service has no such unit"
+        if self.fulfil_token is None:
+            return "this engine fulfils nothing: it has no installation token that may write"
+        lock = self.walking(repository)
+        if not lock.acquire(blocking=False):
+            return "a walk of that service is running: try again when it ends"
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self.clock()))
+        job = Fulfil(f"{stamp}-{len(self.status.fulfils) + 1}", repository, unit, actor,
+                     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock())))
+        self.status.fulfils[job.id] = job
+        self.log(f"convergence: {repository} {unit}: fulfil asked by {actor}")
+        threading.Thread(target=self._fulfil, args=(job, service, lock), daemon=True, name=f"fulfil {job.id}").start()
+        return job
+
+    def _fulfil(self, job: Fulfil, service: Service, lock: threading.Lock) -> None:
+        try:
+            write = self.settings.bitwarden_write_token
+            credentials = dataclasses.replace(
+                self.credentials(), github_token=self.fulfil_token(),
+                write_token_file=str(write) if write and write.is_file() else "")
+            clone = self.clones.refresh(job.repository, credentials.github_token)
+            owner = job.repository.split("/")[0]
+            zones = self.settings.zones.get(owner)
+            zones = zones.split("/")[1] if zones and zones.split("/")[0] == owner and \
+                (self.clones.path(zones).is_dir()) else None
+            result = self.walker(job.repository, clone, zones, self.settings.storage_url, credentials, by=job.actor,
+                                 base=self.base_env, cache=self.settings.work / "cache",
+                                 timeout=self.settings.fulfil_seconds, fulfil_unit=job.unit)
+            job.walk = result
+            if result.ok:
+                # The fulfilled unit's journal replaces that unit's; the others keep theirs.
+                if service.last is not None:
+                    done = {d["service"]["unit"]: d for d in result.documents}
+                    result = dataclasses.replace(service.last, documents=[
+                        done.get(d["service"]["unit"], d) for d in service.last.documents])
+                self._record(service, result)
+            else:
+                job.error = result.error
+        except Exception as e:  # noqa: BLE001 - said on the Fulfil's page; the walk lock is released below
+            job.error = f"the fulfil could not start ({type(e).__name__})"
+        finally:
+            job.done = True
+            lock.release()
+            self.log(f"convergence: {job.repository} {job.unit}: fulfil by {job.actor} ended"
+                     f"{': ' + job.error if job.error else ''}")
 
     def _publish(self, document: dict[str, Any]) -> None:
         if self.buffer is None:

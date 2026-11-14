@@ -13,7 +13,7 @@
       "plugin": "github.app-token",
       "paths": [
         ".github/workflows/deploy.yml",
-        "src/convergence/main.py"
+        "src/convergence/tokens.py"
       ],
       "mode": "required"
     },
@@ -69,6 +69,10 @@
     {
       "path": "tests/steps/test_engine.py",
       "reason": "Checks the walk's environment, with made-up tokens, against a faked pubdeploy"
+    },
+    {
+      "path": "tests/steps/test_fulfil.py",
+      "reason": "Checks a Fulfil's and a round's walk environments, with made-up tokens, against a faked pubdeploy"
     }
   ],
   "own_hosts": [

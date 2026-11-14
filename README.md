@@ -56,12 +56,26 @@ Behind oauth2-proxy and the team sign-in, for people with the role `convergence`
 | Path | What |
 |---|---|
 | `/` | every service, each unit's counts, its last walk, and a failure if the latest try failed |
-| `/services/OWNER/NAME` | each unit's needs: type, grade, state, when checked, what was found, and what makes it ready (the laptop's fulfil command for an auto need until 4b, the proposal or the person's step otherwise); and the unit's walks |
+| `/services/OWNER/NAME` | each unit's needs: type, grade, state, when checked, what was found, and what makes it ready (the proposal or the person's step, or for an auto need the Fulfil button); and the unit's walks |
 | `/services/OWNER/NAME/walks/HASH` | one journaled walk, from storage |
+| `POST /services/OWNER/NAME/fulfil` | a person's Fulfil of one unit (the button) |
+| `/fulfils/ID` | what that Fulfil printed, as pubdeploy prints it (names and states), and how it ended; it reloads itself while it runs |
 | `/healthz` | open; 200 while rounds end in time |
 
 They are plain HTML with no script, `Cache-Control: private, no-store`, and every
 string from a walk escaped.
+
+**Fulfil** (step 4b) is the one thing a page does: `./pubdeploy walk --fulfil --yes
+--unit U` in the service's clone, which makes each auto need that is missing or
+drifted. The person is oauth2-proxy's `X-Forwarded-Email`, which only the proxy can
+set (the network policy lets nothing else reach the engine), and the journal records
+them (`PUBKIT_WALK_BY`). The form carries a token made from that person, the service
+and the unit, and the request must come from this site (`Origin`). A service is never
+fulfilled while it is being walked, by a round or another Fulfil, and a Fulfil may take
+`CONVERGENCE_FULFIL_SECONDS` (1200). Its walk alone gets the installation token that
+may write and the Bitwarden write token's file: every round mints a token limited to
+read and runs `check`, so it cannot write. `k8s.namespace` stays an admin's step: the
+deploy channel needs a kubeconfig on the node that only `sustenaut-app` writes.
 
 ## Credentials
 
@@ -75,10 +89,11 @@ Actions: only the read account's token can read them, and only that child holds 
 
 | What | Where | For |
 |---|---|---|
-| GitHub App "Sustenaut convergence" (`github-app.json`): contents, metadata, actions, secrets, variables and environments, all read | Bitwarden `convergence-app-id`, `-app-key`, `-installation-id`; Secret `convergence-github-app` | the clones, and `gh` in the walks, with one installation token per round |
+| GitHub App "Sustenaut convergence" (`github-app.json`): contents and metadata read; actions write (`deploy.rollout`, `service.health`: dispatching the deploy workflow), secrets write (`github.secret`, `github.deploy-settings`), variables write (`github.variable`, `github.gate`), environments write (`github.deploy-settings` in an environment) | Bitwarden `convergence-app-id`, `-app-key`, `-installation-id`; Secret `convergence-github-app` | the clones and `gh` in the walks: a round's token is minted with the read permissions alone (`tokens.py`), a Fulfil's with the installation's |
 | The ServiceAccount's projected token, audience storage.sustenaut.eu | `/var/run/secrets/storage/token` | principal `k8s:convergence/app`: reads and writes tenant `plane`, writes `need-states` and `calls-convergence-engine` |
 | A read-only Bitwarden machine account's token (optional) | Bitwarden `convergence-bitwarden-read-token`; Secret `convergence-bitwarden` | `./pubsec run`, so the bitwarden.* needs are checked |
-| The ServiceAccount itself | in-cluster | kubectl's reads |
+| The write machine account's token, read and write on Sustenaut (optional) | Bitwarden `convergence-bitwarden-write-token`; Secret `convergence-bitwarden-write` | a Fulfil's walk alone, as `PUBSEC_WRITE_TOKEN_FILE`: `bitwarden.generated` and the other needs that write to Bitwarden |
+| The ServiceAccount itself | in-cluster | kubectl's reads; for a Fulfil, `k8s/admin/write-role.yaml`'s writes (Secrets, a Deployment's restart, a Job from a CronJob), refused in the system namespaces and its own by an admission policy |
 
 The engine's own calls (the token mint, storage) go to its call log through the
 integrations library, into `calls_convergence_engine`. It is an always-on sender in
@@ -108,6 +123,9 @@ engine walks itself too.
 The image installs its lock from GitHub's releases and PyPI, and when that fails,
 from storage's mirrors of the same files (`scripts/mirrored-lock.py`), with the same
 hashes.
+
+Step 4b's own steps (the App's write permissions, the write token, the write role)
+are `scripts/go-live-fulfil.sh`.
 
 ## Development
 

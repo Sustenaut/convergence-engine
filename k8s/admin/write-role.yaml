@@ -1,0 +1,63 @@
+# What a person's Fulfil may change in the cluster (step 4b), as the ServiceAccount
+# convergence/app: a Secret made from Bitwarden (pubsec's k8s.secret), the restart of
+# the Deployments that read it, and a Job from a CronJob (k8s.cronjob, service.health).
+# Nothing else: no delete, no exec, no RBAC (so no escalate or bind), no namespaces
+# (k8s.namespace stays an admin's step), and no Secret read beyond secret-readers.yaml.
+# Rounds use the same identity, but run `pubdeploy check`, which writes nothing.
+# Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: convergence-write
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, update, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [patch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: convergence-write
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: convergence-write
+subjects:
+  - kind: ServiceAccount
+    name: app
+    namespace: convergence
+---
+# RBAC cannot say "everywhere but": this policy refuses the engine's writes in the
+# system namespaces and in its own, whatever a role allows.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: convergence-writes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["", apps, batch]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE, CONNECT]
+        resources: ["*"]
+  matchConditions:
+    - name: the-convergence-engine
+      expression: "request.userInfo.username == 'system:serviceaccount:convergence:app'"
+  validations:
+    - expression: "!(request.namespace in ['kube-system', 'kube-public', 'kube-node-lease', 'convergence'])"
+      message: the convergence engine writes nothing in the system namespaces or in its own
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: convergence-writes
+spec:
+  policyName: convergence-writes
+  validationActions: [Deny]
