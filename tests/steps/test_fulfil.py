@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from pytest_bdd import parsers, scenarios, then, when
 from fastapi.testclient import TestClient
 
 from convergence.clones import Clones
@@ -17,6 +18,8 @@ from convergence.page import create_app
 from convergence.tokens import READ, Tokens
 
 from .fakes import Runner, Storage, journal
+
+scenarios("fulfil.feature")
 
 SITE = "https://convergence.example"
 WHO = "someone@example.org"
@@ -40,7 +43,8 @@ class Caller:
         return Answer()
 
 
-def test_the_rounds_token_may_only_read_and_is_reused():
+@then("the rounds token may only read and is reused")
+def the_rounds_token_may_only_read_and_is_reused():
     caller, now = Caller(), [1000.0]
     tokens = Tokens(caller, "1", "key", "9", sign=lambda *a: "jwt", clock=lambda: now[0])
     assert tokens.read() == "ghs_1" and tokens.read() == "ghs_1"
@@ -50,14 +54,16 @@ def test_the_rounds_token_may_only_read_and_is_reused():
     assert tokens.read() == "ghs_2"
 
 
-def test_a_fulfils_token_has_the_installations_permissions_and_is_minted_each_time():
+@then("a fulfils token has the installations permissions and is minted each time")
+def a_fulfils_token_has_the_installations_permissions_and_is_minted_each_time():
     caller = Caller()
     tokens = Tokens(caller, "1", "key", "9", sign=lambda *a: "jwt")
     assert tokens.write() == "ghs_1" and tokens.write() == "ghs_2"
     assert caller.asked[0].body is None
 
 
-def test_a_refused_mint_raises():
+@then("a refused mint raises")
+def a_refused_mint_raises():
     from integrations.calls import Refused
     with pytest.raises(Refused):
         Tokens(Caller(ok=False), "1", "key", "9", sign=lambda *a: "jwt").read()
@@ -98,13 +104,15 @@ def world(tmp_path):
     return w
 
 
-def test_a_rounds_walk_holds_no_write_token(world):
+@then("a rounds walk holds no write token")
+def a_rounds_walk_holds_no_write_token(world):
     (env,) = world.walk_envs(fulfil=False)
     assert "PUBSEC_WRITE_TOKEN_FILE" not in env and env["GH_TOKEN"] == "ghs_read"
     assert "bws-write" not in json.dumps(env)
 
 
-def test_a_fulfil_walks_one_unit_with_the_write_tokens_as_the_person(world, tmp_path):
+@then("a fulfil walks one unit with the write tokens as the person")
+def a_fulfil_walks_one_unit_with_the_write_tokens_as_the_person(world, tmp_path):
     world.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
     job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
     world.wait(job)
@@ -119,14 +127,16 @@ def test_a_fulfil_walks_one_unit_with_the_write_tokens_as_the_person(world, tmp_
     assert f"convergence: Sustenaut/notifier notifier: fulfil asked by {WHO}" in world.lines
 
 
-def test_a_fulfil_that_prints_no_journal_says_why(world):
+@then("a fulfil that prints no journal says why")
+def a_fulfil_that_prints_no_journal_says_why(world):
     world.runner.walks["Sustenaut/notifier"] = type(world.runner.walks["Sustenaut/notifier"])(2, "", "pubdeploy: no\n")
     job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
     world.wait(job)
     assert job.done and "printed no journal" in job.error
 
 
-def test_a_fulfil_that_cannot_start_says_why(world):
+@then("a fulfil that cannot start says why")
+def a_fulfil_that_cannot_start_says_why(world):
     world.runner.failing["Sustenaut/notifier"] = "gone"
     job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
     world.wait(job)
@@ -134,18 +144,24 @@ def test_a_fulfil_that_cannot_start_says_why(world):
     assert world.engine.walking("Sustenaut/notifier").acquire(blocking=False)
 
 
-@pytest.mark.parametrize(("repository", "unit", "said"), [
-    ("Sustenaut/nothing", "x", "not been walked"), ("Sustenaut/notifier", "x", "no such unit")])
-def test_a_fulfil_of_what_is_not_there_is_refused(world, repository, unit, said):
-    assert said in world.engine.fulfil(repository, unit, WHO)
+@when(parsers.parse('a fulfil of the unit "{unit}" of "{repository}" is asked for'), target_fixture="said")
+def fulfil_asked(world, repository, unit):
+    return world.engine.fulfil(repository, unit, WHO)
 
 
-def test_no_fulfil_while_that_service_is_walked(world):
+@then(parsers.parse('the engine refuses it, saying "{text}"'))
+def engine_refuses(said, text):
+    assert text in said
+
+
+@then("no fulfil while that service is walked")
+def no_fulfil_while_that_service_is_walked(world):
     world.engine.walking("Sustenaut/notifier").acquire()
     assert "is running" in world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
 
 
-def test_an_engine_without_a_write_token_fulfils_nothing(tmp_path):
+@then("an engine without a write token fulfils nothing")
+def an_engine_without_a_write_token_fulfils_nothing(tmp_path):
     w = World(tmp_path, fulfil=False)
     w.engine.round()
     assert "fulfils nothing" in w.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
@@ -162,13 +178,15 @@ def form_of(client):
     return dict(re.findall(r'name="(unit|token)" value="([^"]+)"', page))
 
 
-def test_the_page_offers_a_fulfil_to_the_signed_in_person_alone(client):
+@then("the page offers a fulfil to the signed in person alone")
+def the_page_offers_a_fulfil_to_the_signed_in_person_alone(client):
     assert "Fulfil the auto needs of notifier" in client.get(
         "/services/Sustenaut/notifier", headers={"X-Forwarded-Email": WHO}).text
     assert "Fulfil the" not in client.get("/services/Sustenaut/notifier").text
 
 
-def test_a_fulfil_from_the_page_runs_and_its_page_says_how_it_went(client, world):
+@then("a fulfil from the page runs and its page says how it went")
+def a_fulfil_from_the_page_runs_and_its_page_says_how_it_went(client, world):
     world.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
     answer = client.post("/services/Sustenaut/notifier/fulfil", data=form_of(client), follow_redirects=False,
                          headers={"X-Forwarded-Email": WHO, "Origin": SITE})
@@ -179,7 +197,8 @@ def test_a_fulfil_from_the_page_runs_and_its_page_says_how_it_went(client, world
     assert "Done." in page.text and WHO in page.text and "Refresh" not in page.headers
 
 
-def test_a_running_fulfils_page_reloads_itself(client, world):
+@then("a running fulfils page reloads itself")
+def a_running_fulfils_page_reloads_itself(client, world):
     from convergence.engine import Fulfil
     world.engine.status.fulfils["x"] = Fulfil("x", "Sustenaut/notifier", "notifier", WHO, "now")
     page = client.get("/fulfils/x")
@@ -189,18 +208,28 @@ def test_a_running_fulfils_page_reloads_itself(client, world):
     assert client.get("/fulfils/nope").status_code == 404
 
 
-@pytest.mark.parametrize(("headers", "change", "status"), [
-    ({"Origin": SITE}, {}, 403),
-    ({"X-Forwarded-Email": WHO, "Origin": "https://elsewhere.example"}, {}, 403),
-    ({"X-Forwarded-Email": WHO, "Origin": SITE}, {"token": "0" * 64}, 403),
-    ({"X-Forwarded-Email": "other@example.org", "Origin": SITE}, {}, 403),
-])
-def test_a_fulfil_without_the_person_this_site_or_their_form_is_refused(client, headers, change, status):
-    data = {**form_of(client), **change}
-    assert client.post("/services/Sustenaut/notifier/fulfil", data=data, headers=headers).status_code == status
+ASKERS = {
+    "no one signed in": {"Origin": SITE},
+    "the person, from another site": {"X-Forwarded-Email": WHO, "Origin": "https://elsewhere.example"},
+    "another person": {"X-Forwarded-Email": "other@example.org", "Origin": SITE},
+    "the person": {"X-Forwarded-Email": WHO, "Origin": SITE},
+}
+FORMS = {"their form": {}, "a form with another token": {"token": "0" * 64}}
 
 
-def test_a_fulfil_the_engine_refuses_is_said(client, world):
+@when(parsers.parse("{asker} posts a fulfil with {form}"), target_fixture="answer")
+def posts_fulfil(client, asker, form):
+    data = {**form_of(client), **FORMS[form]}
+    return client.post("/services/Sustenaut/notifier/fulfil", data=data, headers=ASKERS[asker])
+
+
+@then(parsers.parse("the page answers {status:d}"))
+def page_answers(answer, status):
+    assert answer.status_code == status
+
+
+@then("a fulfil the engine refuses is said")
+def a_fulfil_the_engine_refuses_is_said(client, world):
     world.engine.walking("Sustenaut/notifier").acquire()
     answer = client.post("/services/Sustenaut/notifier/fulfil", data=form_of(client),
                          headers={"X-Forwarded-Email": WHO, "Origin": SITE})
@@ -223,7 +252,8 @@ def google_world(tmp_path):
     return w
 
 
-def test_a_round_gets_the_read_paths_google_credential_alone(tmp_path):
+@then("a round gets the read paths google credential alone")
+def a_round_gets_the_read_paths_google_credential_alone(tmp_path):
     w = google_world(tmp_path)
     (env,) = w.walk_envs(fulfil=False)
     read = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
@@ -236,7 +266,8 @@ def test_a_round_gets_the_read_paths_google_credential_alone(tmp_path):
     assert "PUBSEC_GCP_KEYS_GRANTED_IN" not in env
 
 
-def test_a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_directory(tmp_path):
+@then("a fulfil gets the write paths google credential and its own gcloud directory")
+def a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_directory(tmp_path):
     w = google_world(tmp_path)
     w.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
     job = w.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
@@ -249,6 +280,7 @@ def test_a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_dire
     assert env["PUBSEC_GCP_KEYS_GRANTED_IN"].endswith("infra/convergence-keys.tf")
 
 
-def test_without_a_pool_no_walk_gets_a_google_credential(world):
+@then("without a pool no walk gets a google credential")
+def without_a_pool_no_walk_gets_a_google_credential(world):
     (env,) = world.walk_envs(fulfil=False)
     assert not any(k.startswith("CLOUDSDK_") for k in env)

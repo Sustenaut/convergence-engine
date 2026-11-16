@@ -121,3 +121,6 @@ Feature: Rounds of read-only walks
   Scenario: A fresh work claim gets its home, caches and clones
     When the work directory is prepared
     Then it has "home, cache, clones"
+
+  Scenario: Rounds do not overlap across threads
+    Then rounds do not overlap across threads

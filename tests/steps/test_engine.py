@@ -226,7 +226,8 @@ def engine_health(world: World, health: str) -> None:
     assert world.engine.healthy() is (health == "healthy")
 
 
-def test_rounds_do_not_overlap_across_threads(tmp_path: Path) -> None:
+@then("rounds do not overlap across threads")
+def rounds_do_not_overlap_across_threads(tmp_path: Path) -> None:
     w = World(tmp_path)
     w.runner.states["Sustenaut/release-state"] = json.dumps({"owner": "Sustenaut", "repos": {}})
     w.engine._running.acquire()  # noqa: SLF001

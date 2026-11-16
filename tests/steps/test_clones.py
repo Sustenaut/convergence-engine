@@ -177,6 +177,7 @@ def its_place(ctx: dict, prefix: str) -> None:
     assert place.startswith(prefix) and place.endswith(".avro")
 
 
-def test_head_names_are_flat_lower_case_and_short() -> None:
+@then("head names are flat lower case and short")
+def head_names_are_flat_lower_case_and_short() -> None:
     assert head("Sustenaut/release-controlplane", "release-schryer") == "sustenaut.release-controlplane.release-schryer"
     assert head("Some_Owner/Repo", "U" * 80) == ("some_owner.repo." + "u" * 80)[:64]
