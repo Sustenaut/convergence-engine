@@ -203,14 +203,18 @@ def review_post(host: str, port: str, token_file: str, ca_file: str,
     import ssl
     import urllib.request
 
+    # The cluster's own CA, the hostname checked and a certificate required.
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_file)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+
     def post(body: dict) -> dict:
         with open(token_file, encoding="utf-8") as f:
             own = f.read().strip()
         request = urllib.request.Request(
             f"https://{host}:{port}/apis/authentication.k8s.io/v1/tokenreviews", json.dumps(body).encode(),
             {"Authorization": f"Bearer {own}", "Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(request, timeout=timeout,
-                                    context=ssl.create_default_context(cafile=ca_file)) as answer:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as answer:
             return json.loads(answer.read())
     return post
 
