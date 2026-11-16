@@ -7,10 +7,10 @@ walk. A service whose clone or walk fails keeps its last good walk on its page, 
 the failure beside it; the round goes on to the next. One round at a time: a round
 asked for while one runs is not started.
 
-A Fulfil is one person's walk of one unit with --fulfil, from the page: never while
-the same service is being walked (by a round or another Fulfil), with the
-installation token that may write and the Bitwarden write token's file, which no
-round ever gets. The journal says who asked (PUBKIT_WALK_BY, their email).
+A Fulfil is one approved request's walk of one unit with --fulfil (approvals.py):
+never while the same service is being walked (by a round or another request), with
+the installation token that may write and the Bitwarden write token's file, which no
+round ever gets. The journal says who approved it (PUBKIT_WALK_BY, their email).
 """
 
 from __future__ import annotations
@@ -42,25 +42,11 @@ class Service:
 
 
 @dataclass
-class Fulfil:
-    """One person's Fulfil of one unit: what it said, and how it ended."""
-    id: str
-    repository: str
-    unit: str
-    actor: str
-    started_at: str
-    done: bool = False
-    walk: Walk | None = None
-    error: str = ""
-
-
-@dataclass
 class Status:
     services: dict[str, Service] = field(default_factory=dict)
     round_started: float | None = None
     round_ended: float | None = None
     problem: str = ""  # a round that could not start: no token, no state
-    fulfils: dict[str, Fulfil] = field(default_factory=dict)
 
 
 def prepare(work: Path) -> None:
@@ -193,58 +179,54 @@ class Engine:
             self.log(f"convergence: {service.repository} {document['service']['unit']}: {said or 'no needs'}")
             self._publish(document)
 
-    def fulfil(self, repository: str, unit: str, actor: str) -> Fulfil | str:
-        """Start a person's Fulfil of one unit, in its own thread; the Fulfil, or why not."""
+    def can_fulfil(self, repository: str, unit: str) -> str:
+        """Why that unit cannot be fulfilled, as a reason's name (approvals.REASONS), or ""."""
         service = self.status.services.get(repository)
         if service is None or service.last is None:
-            return "that service has not been walked yet"
+            return "not-walked"
         if unit not in {d["service"]["unit"] for d in service.last.documents}:
-            return "that service has no such unit"
+            return "no-such-unit"
         if self.fulfil_token is None:
-            return "this engine fulfils nothing: it has no installation token that may write"
-        lock = self.walking(repository)
-        if not lock.acquire(blocking=False):
-            return "a walk of that service is running: try again when it ends"
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self.clock()))
-        job = Fulfil(f"{stamp}-{len(self.status.fulfils) + 1}", repository, unit, actor,
-                     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock())))
-        self.status.fulfils[job.id] = job
-        self.log(f"convergence: {repository} {unit}: fulfil asked by {actor}")
-        threading.Thread(target=self._fulfil, args=(job, service, lock), daemon=True, name=f"fulfil {job.id}").start()
-        return job
+            return "fulfils-nothing"
+        return ""
 
-    def _fulfil(self, job: Fulfil, service: Service, lock: threading.Lock) -> None:
-        try:
-            write = self.settings.bitwarden_write_token
-            credentials = dataclasses.replace(
-                self.credentials(), github_token=self.fulfil_token(),
-                write_token_file=str(write) if write and write.is_file() else "",
-                google=self.google.get("write", ()))
-            clone = self.clones.refresh(job.repository, credentials.github_token)
-            owner = job.repository.split("/")[0]
-            zones = self.settings.zones.get(owner)
-            zones = zones.split("/")[1] if zones and zones.split("/")[0] == owner and \
-                (self.clones.path(zones).is_dir()) else None
-            result = self.walker(job.repository, clone, zones, self.settings.storage_url, credentials, by=job.actor,
-                                 base=self.base_env, cache=self.settings.work / "cache",
-                                 timeout=self.settings.fulfil_seconds, fulfil_unit=job.unit)
-            job.walk = result
-            if result.ok:
-                # The fulfilled unit's journal replaces that unit's; the others keep theirs.
-                if service.last is not None:
-                    done = {d["service"]["unit"]: d for d in result.documents}
-                    result = dataclasses.replace(service.last, documents=[
-                        done.get(d["service"]["unit"], d) for d in service.last.documents])
-                self._record(service, result)
-            else:
-                job.error = result.error
-        except Exception as e:  # noqa: BLE001 - said on the Fulfil's page; the walk lock is released below
-            job.error = f"the fulfil could not start ({type(e).__name__})"
-        finally:
-            job.done = True
-            lock.release()
-            self.log(f"convergence: {job.repository} {job.unit}: fulfil by {job.actor} ended"
-                     f"{': ' + job.error if job.error else ''}")
+    def _zones_of(self, repository: str) -> str | None:
+        owner = repository.split("/")[0]
+        zones = self.settings.zones.get(owner)
+        return zones.split("/")[1] if zones and zones.split("/")[0] == owner and \
+            self.clones.path(zones).is_dir() else None
+
+    def check_unit(self, repository: str, unit: str, by: str) -> Walk:
+        """One unit's read-only walk, with a round's credentials: a request's plan. The
+        caller holds the service's walk lock."""
+        credentials = self.credentials()
+        clone = self.clones.refresh(repository, credentials.github_token)
+        return self.walker(repository, clone, self._zones_of(repository), self.settings.storage_url, credentials,
+                           by=by, base=self.base_env, cache=self.settings.work / "cache",
+                           timeout=self.settings.walk_seconds, unit=unit)
+
+    def fulfil_walk(self, repository: str, unit: str, actor: str) -> Walk:
+        """An approved Fulfil's walk of one unit, as the person who approved it, with the
+        write tokens no round gets. The caller holds the service's walk lock."""
+        write = self.settings.bitwarden_write_token
+        credentials = dataclasses.replace(
+            self.credentials(), github_token=self.fulfil_token(),
+            write_token_file=str(write) if write and write.is_file() else "",
+            google=self.google.get("write", ()))
+        clone = self.clones.refresh(repository, credentials.github_token)
+        self.log(f"convergence: {repository} {unit}: fulfil approved by {actor}")
+        result = self.walker(repository, clone, self._zones_of(repository), self.settings.storage_url, credentials,
+                             by=actor, base=self.base_env, cache=self.settings.work / "cache",
+                             timeout=self.settings.fulfil_seconds, fulfil_unit=unit)
+        service = self.status.services.get(repository)
+        if result.ok and service is not None and service.last is not None:
+            # The fulfilled unit's journal replaces that unit's; the others keep theirs.
+            done = {d["service"]["unit"]: d for d in result.documents}
+            self._record(service, dataclasses.replace(service.last, documents=[
+                done.get(d["service"]["unit"], d) for d in service.last.documents]))
+        self.log(f"convergence: {repository} {unit}: fulfil by {actor} ended"
+                 f"{': ' + result.error if result.error else ''}")
+        return result
 
     def _publish(self, document: dict[str, Any]) -> None:
         if self.buffer is None:

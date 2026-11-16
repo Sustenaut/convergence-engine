@@ -1,0 +1,26 @@
+# Requests (approvals.py): a listed ServiceAccount's token (CONVERGENCE_REQUESTERS, such
+# as integrations:app) is checked with the cluster's TokenReview, as convergence/app.
+# Creating a TokenReview reads nothing and changes nothing: the cluster only says whom a
+# token is for. Applied by the deploy walk over the admin channel (pubkit.json's
+# k8s.manifests).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: convergence-token-review
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: convergence-token-review
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: convergence-token-review
+subjects:
+  - kind: ServiceAccount
+    name: app
+    namespace: convergence

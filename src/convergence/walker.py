@@ -3,7 +3,7 @@
     ./pubdeploy check --json --journal URL [--zones ../ZONES/pubkit.json]
     ./pubsec run -- ./pubdeploy check ...          with a Bitwarden read token
 
-`check` is a walk that cannot fulfil. A person's Fulfil (the page's button) runs
+`check` is a walk that cannot fulfil; a request's plan is `check --unit U`. An approved Fulfil (the page's button) runs
 `./pubdeploy walk --fulfil --yes --unit U` instead, the one place the Bitwarden
 write token's file (PUBSEC_WRITE_TOKEN_FILE) and the installation token that may
 write reach a walk. The subprocess's environment is built
@@ -61,9 +61,10 @@ class Credentials:
     google: tuple[tuple[str, str], ...] = ()
 
 
-def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None) -> list[str]:
+def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None,
+         unit: str | None = None) -> list[str]:
     command = (["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", fulfil_unit] if fulfil_unit
-               else ["./pubdeploy", "check"]) + ["--json", "--journal", journal]
+               else ["./pubdeploy", "check", *(["--unit", unit] if unit else [])]) + ["--json", "--journal", journal]
     if zones:
         command += ["--zones", f"../{zones}/pubkit.json"]
     return ["./pubsec", "run", "--", *command] if through_pubsec else command
@@ -94,14 +95,14 @@ def documents(stdout: str) -> list[dict[str, Any]]:
 def walk(repository: str, clone: Path, zones: str | None, journal: str, credentials: Credentials, *,
          by: str = "schedule", base: Mapping[str, str], cache: Path, timeout: float,
          runner: Runner = run, clock=time.monotonic, now=lambda: datetime.now(timezone.utc),
-         fulfil_unit: str | None = None) -> Walk:
+         fulfil_unit: str | None = None, unit: str | None = None) -> Walk:
     result = Walk(repository, now().strftime("%Y-%m-%dT%H:%M:%SZ"))
     if not (clone / "pubdeploy").is_file():
         result.error = "the repository has no ./pubdeploy: its pubkit sync has not run with a deploy block"
         return result
     through_pubsec = bool(credentials.bitwarden_token) and (clone / "pubsec").is_file()
     started = clock()
-    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit), clone,
+    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit, unit), clone,
                       environment(base, credentials, by, cache), timeout)
     result.seconds = round(clock() - started, 3)
     # A fulfil's plan and what it did, as pubdeploy prints them (names and states, no value).

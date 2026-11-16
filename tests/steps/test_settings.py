@@ -178,3 +178,11 @@ def kept(ctx: dict) -> None:
 def google_read(ctx: dict, path: str) -> None:
     got = settings(ctx["env"])
     assert got.google_read_token == Path(path) and got.google_pool.endswith("/convergence")
+
+
+@then(parsers.parse('the requests settings are {hours:d} hours, owners "{owners}" and requesters "{requesters}"'))
+def requests_settings(ctx: dict, hours: int, owners: str, requesters: str) -> None:
+    got = settings(ctx["env"])
+    assert (got.request_hours, got.request_owners, got.requesters) == \
+        (hours, tuple(o.strip() for o in owners.split(",")), tuple(r.strip() for r in requesters.split(",")))
+    assert got.site == "https://convergence.sustenaut.eu" and settings({}).requesters == ()

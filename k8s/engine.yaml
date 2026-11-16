@@ -84,6 +84,11 @@ spec:
               value: convergence-key-reader@sustenaut.iam.gserviceaccount.com
             - name: CONVERGENCE_GOOGLE_ADMIN
               value: convergence-key-admin@sustenaut.iam.gserviceaccount.com
+            # Requests (approvals.py): the ServiceAccounts that may ask for a gate, checked
+            # with the cluster's TokenReview (admin/token-review.yaml). GitHub runs of
+            # CONVERGENCE_REQUEST_OWNERS' repositories (Sustenaut) need no setting.
+            - name: CONVERGENCE_REQUESTERS
+              value: integrations:app
           volumeMounts:
             - name: work
               mountPath: /work

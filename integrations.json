@@ -10,6 +10,13 @@
       "mode": "required"
     },
     {
+      "plugin": "github.actions-oidc",
+      "paths": [
+        "src/convergence/callers.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "github.app-token",
       "paths": [
         ".github/workflows/deploy.yml",
@@ -76,12 +83,20 @@
   ],
   "exclude": [
     {
+      "path": "tests/steps/test_approvals.py",
+      "reason": "Checks GitHub Actions OIDC tokens signed with a key made in the test, against a local JWKS"
+    },
+    {
       "path": "tests/steps/test_engine.py",
       "reason": "Checks the walk's environment, with made-up tokens, against a faked pubdeploy"
     },
     {
       "path": "tests/steps/test_fulfil.py",
       "reason": "Checks a Fulfil's and a round's walk environments, with made-up tokens, against a faked pubdeploy"
+    },
+    {
+      "path": "tests/steps/world.py",
+      "reason": "Makes GitHub Actions OIDC tokens with a key made in the test, and a faked TokenReview"
     }
   ],
   "own_hosts": [

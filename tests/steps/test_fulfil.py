@@ -1,28 +1,24 @@
-"""A person's Fulfil: the write token reaches that walk alone, never a round's."""
+"""A person's Fulfil: the write token reaches that walk alone, never a round's, and a
+press is a request its person approves once the plan is walked."""
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import hmac
 import json
-import threading
+import re
 from pathlib import Path
 
 import pytest
-from pytest_bdd import parsers, scenarios, then, when
-from fastapi.testclient import TestClient
+from pytest_bdd import given, parsers, scenarios, then, when
 
-from convergence.clones import Clones
-from convergence.config import settings
-from convergence.engine import Engine
-from convergence.journals import Journals
-from convergence.page import create_app
 from convergence.tokens import READ, Tokens
 
-from .fakes import Runner, Storage, journal
+from .fakes import journal
+from .world import REPOSITORY, SITE, WHO, World, person
 
 scenarios("fulfil.feature")
-
-SITE = "https://convergence.example"
-WHO = "someone@example.org"
 
 
 class Caller:
@@ -69,182 +65,28 @@ def a_refused_mint_raises():
         Tokens(Caller(ok=False), "1", "key", "9", sign=lambda *a: "jwt").read()
 
 
-class World:
-    def __init__(self, tmp: Path, fulfil=True):
-        (tmp / "storage-token").write_text("storage-token")
-        (tmp / "write-token").write_text("bws-write")
-        self.runner, self.lines = Runner(), []
-        self.runner.states["Sustenaut/release-state"] = json.dumps(
-            {"owner": "Sustenaut", "repos": {"notifier": {"deploy": True}}})
-        self.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "missing"}), code=1)
-        env = {"CONVERGENCE_STORAGE_URL": "https://storage.test", "CONVERGENCE_WORK": str(tmp),
-               "CONVERGENCE_STORAGE_TOKEN_FILE": str(tmp / "storage-token"),
-               "CONVERGENCE_BITWARDEN_WRITE_TOKEN_FILE": str(tmp / "write-token")}
-        from convergence.walker import walk
-
-        def walker(*a, **k):
-            return walk(*a, **k, runner=self.runner)
-        self.engine = Engine(settings(env), Clones(tmp, self.runner, {"PATH": "/bin"}), lambda: "ghs_read", None,
-                             base_env={"PATH": "/bin"}, walker=walker, log=self.lines.append,
-                             fulfil_token=(lambda: "ghs_write") if fulfil else None)
-
-    def walk_envs(self, fulfil: bool):
-        return [env for argv, _, env in self.runner.calls if argv[0] != "git" and ("--fulfil" in argv) == fulfil]
-
-    def wait(self, job):
-        for t in threading.enumerate():
-            if t.name == f"fulfil {job.id}":
-                t.join(10)
+POOL = "projects/1/locations/global/workloadIdentityPools/convergence"
 
 
-@pytest.fixture
-def world(tmp_path):
+@given("the engine has walked Sustenaut/notifier", target_fixture="world")
+def walked(tmp_path: Path) -> World:
     w = World(tmp_path)
     w.engine.round()
     return w
 
 
-@then("a rounds walk holds no write token")
-def a_rounds_walk_holds_no_write_token(world):
-    (env,) = world.walk_envs(fulfil=False)
-    assert "PUBSEC_WRITE_TOKEN_FILE" not in env and env["GH_TOKEN"] == "ghs_read"
-    assert "bws-write" not in json.dumps(env)
-
-
-@then("a fulfil walks one unit with the write tokens as the person")
-def a_fulfil_walks_one_unit_with_the_write_tokens_as_the_person(world, tmp_path):
-    world.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
-    job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
-    world.wait(job)
-    assert job.done and not job.error
-    (env,) = world.walk_envs(fulfil=True)
-    assert env["GH_TOKEN"] == "ghs_write" and env["PUBKIT_WALK_BY"] == WHO
-    assert env["PUBSEC_WRITE_TOKEN_FILE"] == str(tmp_path / "write-token")
-    argv = next(a for a, _, _ in world.runner.calls if "--fulfil" in a)
-    assert argv[:6] == ["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", "notifier"]
-    last = world.engine.status.services["Sustenaut/notifier"].last
-    assert last.documents[0]["needs"][0]["state"] == "ready"
-    assert f"convergence: Sustenaut/notifier notifier: fulfil asked by {WHO}" in world.lines
-
-
-@then("a fulfil that prints no journal says why")
-def a_fulfil_that_prints_no_journal_says_why(world):
-    world.runner.walks["Sustenaut/notifier"] = type(world.runner.walks["Sustenaut/notifier"])(2, "", "pubdeploy: no\n")
-    job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
-    world.wait(job)
-    assert job.done and "printed no journal" in job.error
-
-
-@then("a fulfil that cannot start says why")
-def a_fulfil_that_cannot_start_says_why(world):
-    world.runner.failing["Sustenaut/notifier"] = "gone"
-    job = world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
-    world.wait(job)
-    assert job.done and job.error.startswith("the fulfil could not start")
-    assert world.engine.walking("Sustenaut/notifier").acquire(blocking=False)
-
-
-@when(parsers.parse('a fulfil of the unit "{unit}" of "{repository}" is asked for'), target_fixture="said")
-def fulfil_asked(world, repository, unit):
-    return world.engine.fulfil(repository, unit, WHO)
-
-
-@then(parsers.parse('the engine refuses it, saying "{text}"'))
-def engine_refuses(said, text):
-    assert text in said
-
-
-@then("no fulfil while that service is walked")
-def no_fulfil_while_that_service_is_walked(world):
-    world.engine.walking("Sustenaut/notifier").acquire()
-    assert "is running" in world.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
-
-
-@then("an engine without a write token fulfils nothing")
-def an_engine_without_a_write_token_fulfils_nothing(tmp_path):
+@given("the engine without a write token has walked Sustenaut/notifier", target_fixture="world")
+def walked_without_write(tmp_path: Path) -> World:
     w = World(tmp_path, fulfil=False)
     w.engine.round()
-    assert "fulfils nothing" in w.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
+    return w
 
 
-@pytest.fixture
-def client(world):
-    return TestClient(create_app(world.engine, Journals(Storage()), site=SITE, key=b"k" * 32))
-
-
-def form_of(client):
-    page = client.get("/services/Sustenaut/notifier", headers={"X-Forwarded-Email": WHO}).text
-    import re
-    return dict(re.findall(r'name="(unit|token)" value="([^"]+)"', page))
-
-
-@then("the page offers a fulfil to the signed in person alone")
-def the_page_offers_a_fulfil_to_the_signed_in_person_alone(client):
-    assert "Fulfil the auto needs of notifier" in client.get(
-        "/services/Sustenaut/notifier", headers={"X-Forwarded-Email": WHO}).text
-    assert "Fulfil the" not in client.get("/services/Sustenaut/notifier").text
-
-
-@then("a fulfil from the page runs and its page says how it went")
-def a_fulfil_from_the_page_runs_and_its_page_says_how_it_went(client, world):
-    world.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
-    answer = client.post("/services/Sustenaut/notifier/fulfil", data=form_of(client), follow_redirects=False,
-                         headers={"X-Forwarded-Email": WHO, "Origin": SITE})
-    assert answer.status_code == 303
-    job = next(iter(world.engine.status.fulfils.values()))
-    world.wait(job)
-    page = client.get(answer.headers["location"])
-    assert "Done." in page.text and WHO in page.text and "Refresh" not in page.headers
-
-
-@then("a running fulfils page reloads itself")
-def a_running_fulfils_page_reloads_itself(client, world):
-    from convergence.engine import Fulfil
-    world.engine.status.fulfils["x"] = Fulfil("x", "Sustenaut/notifier", "notifier", WHO, "now")
-    page = client.get("/fulfils/x")
-    assert page.headers["Refresh"] == "5" and "Running" in page.text
-    world.engine.status.fulfils["x"].done, world.engine.status.fulfils["x"].error = True, "it broke"
-    assert "it broke" in client.get("/fulfils/x").text
-    assert client.get("/fulfils/nope").status_code == 404
-
-
-ASKERS = {
-    "no one signed in": {"Origin": SITE},
-    "the person, from another site": {"X-Forwarded-Email": WHO, "Origin": "https://elsewhere.example"},
-    "another person": {"X-Forwarded-Email": "other@example.org", "Origin": SITE},
-    "the person": {"X-Forwarded-Email": WHO, "Origin": SITE},
-}
-FORMS = {"their form": {}, "a form with another token": {"token": "0" * 64}}
-
-
-@when(parsers.parse("{asker} posts a fulfil with {form}"), target_fixture="answer")
-def posts_fulfil(client, asker, form):
-    data = {**form_of(client), **FORMS[form]}
-    return client.post("/services/Sustenaut/notifier/fulfil", data=data, headers=ASKERS[asker])
-
-
-@then(parsers.parse("the page answers {status:d}"))
-def page_answers(answer, status):
-    assert answer.status_code == status
-
-
-@then("a fulfil the engine refuses is said")
-def a_fulfil_the_engine_refuses_is_said(client, world):
-    world.engine.walking("Sustenaut/notifier").acquire()
-    answer = client.post("/services/Sustenaut/notifier/fulfil", data=form_of(client),
-                         headers={"X-Forwarded-Email": WHO, "Origin": SITE})
-    assert answer.status_code == 409 and "is running" in answer.text
-
-
-POOL = "projects/1/locations/global/workloadIdentityPools/convergence"
-
-
-def google_world(tmp_path):
+@given("the engine with a Google pool has walked Sustenaut/notifier", target_fixture="world")
+def walked_with_google(tmp_path: Path) -> World:
     w = World(tmp_path)
-    s = w.engine.settings
-    import dataclasses
     w.engine.settings = dataclasses.replace(
-        s, google_pool=POOL, google_reader="reader@p.iam.gserviceaccount.com",
+        w.engine.settings, google_pool=POOL, google_reader="reader@p.iam.gserviceaccount.com",
         google_admin="admin@p.iam.gserviceaccount.com", google_read_token=tmp_path / "gread",
         google_write_token=tmp_path / "gwrite")
     w.engine.google = w.engine._google()  # noqa: SLF001
@@ -252,10 +94,183 @@ def google_world(tmp_path):
     return w
 
 
+@given("the clone of Sustenaut/notifier fails")
+def clone_fails(world: World) -> None:
+    world.runner.failing[REPOSITORY] = "gone"
+
+
+@given("a walk of Sustenaut/notifier is running")
+def walk_running(world: World) -> None:
+    world.engine.walking(REPOSITORY).acquire()
+    world.approvals.lock_seconds = 0.2
+
+
+@given("storage refuses every write")
+def storage_refuses(world: World) -> None:
+    world.storage.refuse_writes = True
+
+
+def _makes_ready(world: World) -> None:
+    world.runner.fulfil_prints(REPOSITORY, journal(states={"k8s.secret:s": "ready"}), stderr="k8s.secret:s: made\n")
+
+
+@when(parsers.re(r'the person presses Fulfil for the unit "(?P<unit>[^"]+)" and the walk makes it ready'))
+def press_ready(world: World, unit: str) -> None:
+    _makes_ready(world)
+    world.ask = world.approvals.press(REPOSITORY, unit, WHO)
+    world.wait()
+
+
+@when(parsers.re(r'the person presses Fulfil for the unit "(?P<unit>[^"]+)" and the walk prints no journal'))
+def press_no_journal(world: World, unit: str) -> None:
+    world.runner.fulfils[REPOSITORY] = type(world.runner.walks[REPOSITORY])(2, "", "pubdeploy: no\n")
+    world.ask = world.approvals.press(REPOSITORY, unit, WHO)
+    world.wait()
+
+
+@when(parsers.re(r'the person presses Fulfil for the unit "(?P<unit>[^"]+)"'))
+def press(world: World, unit: str) -> None:
+    world.ask = world.approvals.press(REPOSITORY, unit, WHO)
+    world.wait()
+
+
+@when(parsers.re(r'the person presses Fulfil for the unit "(?P<unit>[^"]+)" of "(?P<repository>[^"]+)"'))
+def press_of(world: World, unit: str, repository: str) -> None:
+    world.ask = world.approvals.press(repository, unit, WHO)
+
+
+@then(parsers.re(r'the request ends "(?P<state>[^"]+)"'))
+def request_ends(world: World, state: str) -> None:
+    assert world.ask.state == state, world.ask.error
+
+
+@then(parsers.parse('the request ends "{state}", saying "{text}"'))
+def request_ends_saying(world: World, state: str, text: str) -> None:
+    assert world.ask.state == state and text in world.ask.error, world.ask.error
+
+
+@then(parsers.parse('the press is refused, saying "{text}"'))
+def press_refused(world: World, text: str) -> None:
+    assert isinstance(world.ask, str) and text in world.ask
+
+
+@then("the plan walk was read-only and the Fulfil walk had the write tokens as the person")
+def plan_then_fulfil(world: World, tmp_path: Path) -> None:
+    checks = [a for a in world.runner.walked("--unit") if "--fulfil" not in a]
+    assert len(checks) == 2 and checks[0][:4] == ["./pubdeploy", "check", "--unit", "notifier"]
+    (env,) = world.walk_envs(fulfil=True)
+    assert env["GH_TOKEN"] == "ghs_write" and env["PUBKIT_WALK_BY"] == WHO
+    assert env["PUBSEC_WRITE_TOKEN_FILE"] == str(tmp_path / "write-token")
+    (argv,) = world.runner.walked("--fulfil")
+    assert argv[:6] == ["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", "notifier"]
+    plan_envs = [env for argv, _, env in world.runner.calls if "check" in argv and "--unit" in argv]
+    assert all(e["GH_TOKEN"] == "ghs_read" and "PUBSEC_WRITE_TOKEN_FILE" not in e for e in plan_envs)
+    assert f"convergence: {REPOSITORY} notifier: fulfil approved by {WHO}" in world.lines
+    assert world.ask.approver == WHO and world.ask.needs == [{"need": "k8s.secret:s", "state": "ready"}]
+
+
+@then("the service page shows the need ready")
+def service_ready(world: World) -> None:
+    last = world.engine.status.services[REPOSITORY].last
+    assert last.documents[0]["needs"][0]["state"] == "ready"
+
+
+@then("the service can be walked again")
+def walked_again(world: World) -> None:
+    assert world.engine.walking(REPOSITORY).acquire(blocking=False)
+
+
+@then("no Fulfil walk ran")
+def no_fulfil(world: World) -> None:
+    assert world.runner.walked("--fulfil") == [] and world.runner.walked("--unit") == []
+
+
+def form_of(world: World, unit: str | None = None) -> dict[str, str]:
+    page = world.client.get(f"/services/{REPOSITORY}", headers=person()).text
+    if unit is None:
+        return dict(re.findall(r'name="(unit|token)" value="([^"]+)"', page))
+    # The token the page would make for a unit it shows no button for.
+    return {"unit": unit, "token": hmac.new(b"k" * 32, "\n".join(("fulfil", WHO, REPOSITORY, unit)).encode(),
+                                            hashlib.sha256).hexdigest()}
+
+
+@then("the page offers a fulfil to the signed in person with the role alone")
+def offers_fulfil(world: World) -> None:
+    assert "Fulfil the auto needs of notifier" in world.client.get(f"/services/{REPOSITORY}", headers=person()).text
+    assert "Fulfil the" not in world.client.get(f"/services/{REPOSITORY}").text
+    assert "Fulfil the" not in world.client.get(f"/services/{REPOSITORY}", headers=person(role=False)).text
+
+
+@when("the person posts the Fulfil form and the walk makes it ready")
+def post_form(world: World) -> None:
+    _makes_ready(world)
+    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world), follow_redirects=False,
+                                     headers=person())
+    world.wait()
+
+
+@when(parsers.parse('the person posts the Fulfil form for the unit "{unit}"'))
+def post_form_unit(world: World, unit: str) -> None:
+    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world, unit), headers=person())
+
+
+@then("the answer sends them to the request's page")
+def sent_to_request(world: World) -> None:
+    assert world.answer.status_code == 303 and world.answer.headers["location"].startswith("/approvals/")
+
+
+@then("the request's page says it is done, approved by the person")
+def request_page_done(world: World) -> None:
+    page = world.client.get(world.answer.headers["location"], headers=person())
+    assert "<span class=ready>done</span>" in page.text and "Refresh" not in page.headers
+    assert "<td><span class=ready>approved</span><td>" in page.text and WHO in page.text
+    assert "k8s.secret:s: made" in page.text and "<code>k8s.secret:s</code>" in page.text
+    assert "Approve</button>" not in page.text
+
+
+@then("the old Fulfil link leads to the request's page")
+def old_link(world: World) -> None:
+    id_ = world.answer.headers["location"].rsplit("/", 1)[1]
+    answer = world.client.get(f"/fulfils/{id_}", follow_redirects=False)
+    assert answer.status_code == 303 and answer.headers["location"] == f"/approvals/{id_}"
+
+
+ASKERS = {
+    "no one signed in": {"Origin": SITE},
+    "the person without the role": person(role=False),
+    "the person, from another site": person(origin="https://elsewhere.example"),
+    "another person": person("other@example.org"),
+    "the person": person(),
+}
+FORMS = {"their form": {}, "a form with another token": {"token": "0" * 64}}
+
+
+@when(parsers.parse("{asker} posts a fulfil with {form}"))
+def posts_fulfil(world: World, asker: str, form: str) -> None:
+    data = {**form_of(world), **FORMS[form]}
+    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=data, headers=ASKERS[asker])
+
+
+@then(parsers.re(r"the page answers (?P<status>\d+)"), converters={"status": int})
+def page_answers(world: World, status: int) -> None:
+    assert world.answer.status_code == status
+
+
+@then(parsers.parse('the page answers {status:d} saying "{text}"'))
+def page_answers_saying(world: World, status: int, text: str) -> None:
+    assert world.answer.status_code == status and text in world.answer.text
+
+
+@then("a rounds walk holds no write token")
+def a_rounds_walk_holds_no_write_token(world: World) -> None:
+    (env,) = world.walk_envs(fulfil=False)
+    assert "PUBSEC_WRITE_TOKEN_FILE" not in env and env["GH_TOKEN"] == "ghs_read"
+    assert "bws-write" not in json.dumps(env)
+
+
 @then("a round gets the read paths google credential alone")
-def a_round_gets_the_read_paths_google_credential_alone(tmp_path):
-    w = google_world(tmp_path)
-    (env,) = w.walk_envs(fulfil=False)
+def a_round_gets_the_read_paths_google_credential_alone(world: World, tmp_path: Path) -> None:
+    (env,) = world.walk_envs(fulfil=False)
     read = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
     assert read["audience"] == f"//iam.googleapis.com/{POOL}/providers/read"
     assert read["credential_source"] == {"file": str(tmp_path / "gread")}
@@ -266,13 +281,9 @@ def a_round_gets_the_read_paths_google_credential_alone(tmp_path):
     assert "PUBSEC_GCP_KEYS_GRANTED_IN" not in env
 
 
-@then("a fulfil gets the write paths google credential and its own gcloud directory")
-def a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_directory(tmp_path):
-    w = google_world(tmp_path)
-    w.runner.walk_prints("Sustenaut/notifier", journal(states={"k8s.secret:s": "ready"}))
-    job = w.engine.fulfil("Sustenaut/notifier", "notifier", WHO)
-    w.wait(job)
-    (env,) = w.walk_envs(fulfil=True)
+@then("the fulfil got the write paths google credential and its own gcloud directory")
+def the_fulfil_got_the_write_path(world: World, tmp_path: Path) -> None:
+    (env,) = world.walk_envs(fulfil=True)
     write = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
     assert write["audience"].endswith("/providers/write")
     assert write["credential_source"] == {"file": str(tmp_path / "gwrite")}
@@ -280,7 +291,7 @@ def a_fulfil_gets_the_write_paths_google_credential_and_its_own_gcloud_directory
     assert env["PUBSEC_GCP_KEYS_GRANTED_IN"].endswith("infra/convergence-keys.tf")
 
 
-@then("without a pool no walk gets a google credential")
-def without_a_pool_no_walk_gets_a_google_credential(world):
+@then("no walk gets a google credential")
+def no_google(world: World) -> None:
     (env,) = world.walk_envs(fulfil=False)
     assert not any(k.startswith("CLOUDSDK_") for k in env)

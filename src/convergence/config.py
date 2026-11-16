@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
+NAMESPACED = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?:[a-z0-9]([a-z0-9.-]*[a-z0-9])?")
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,13 @@ class Settings:
     google_admin: str = ""
     google_read_token: Path | None = None
     google_write_token: Path | None = None
+    # Requests (approvals.py): the site, which is a caller's token's audience too, how long one
+    # awaits a decision, the owners whose GitHub runs may ask, and the ServiceAccounts
+    # (NAMESPACE:NAME) that may ask for a gate.
+    site: str = "https://convergence.sustenaut.eu"
+    request_hours: int = 24
+    request_owners: tuple[str, ...] = ("Sustenaut",)
+    requesters: tuple[str, ...] = ()
 
 
 def _slug(value: str, what: str) -> str:
@@ -72,6 +80,13 @@ def settings(env: Mapping[str, str]) -> Settings:
     if every < 5:
         raise ValueError("CONVERGENCE_EVERY_MINUTES is at least 5")
     bitwarden = env.get("CONVERGENCE_BITWARDEN_TOKEN_FILE", "")
+    hours = int(env.get("CONVERGENCE_REQUEST_HOURS", "24"))
+    if not 1 <= hours <= 24 * 7:
+        raise ValueError("CONVERGENCE_REQUEST_HOURS is 1 to 168")
+    requesters = tuple(r.strip() for r in env.get("CONVERGENCE_REQUESTERS", "").split(",") if r.strip())
+    if not all(NAMESPACED.fullmatch(r) for r in requesters):
+        raise ValueError("CONVERGENCE_REQUESTERS is NAMESPACE:NAME, comma-separated")
+    owners = tuple(o.strip() for o in env.get("CONVERGENCE_REQUEST_OWNERS", "Sustenaut").split(",") if o.strip())
     return Settings(
         states=states, zones=zones,
         storage_url=env.get("CONVERGENCE_STORAGE_URL", "https://storage.sustenaut.eu").rstrip("/"),
@@ -88,4 +103,6 @@ def settings(env: Mapping[str, str]) -> Settings:
         google_reader=env.get("CONVERGENCE_GOOGLE_READER", ""),
         google_admin=env.get("CONVERGENCE_GOOGLE_ADMIN", ""),
         google_read_token=Path(env.get("CONVERGENCE_GOOGLE_READ_TOKEN_FILE", "/var/run/secrets/google-read/token")),
-        google_write_token=Path(env.get("CONVERGENCE_GOOGLE_WRITE_TOKEN_FILE", "/var/run/secrets/google-write/token")))
+        google_write_token=Path(env.get("CONVERGENCE_GOOGLE_WRITE_TOKEN_FILE", "/var/run/secrets/google-write/token")),
+        site=env.get("CONVERGENCE_SITE", "https://convergence.sustenaut.eu").rstrip("/"),
+        request_hours=hours, request_owners=owners, requesters=requesters)
