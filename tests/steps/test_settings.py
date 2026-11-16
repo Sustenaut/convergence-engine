@@ -123,7 +123,8 @@ def fails(ctx: dict, code: int) -> None:
     assert ctx["code"] == code and ctx["err"]
 
 
-def test_the_pod_module_builds_nothing_without_its_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+@then("the pod module builds nothing without its settings")
+def the_pod_module_builds_nothing_without_its_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
     monkeypatch.delenv("CONVERGENCE_SERVE", raising=False)

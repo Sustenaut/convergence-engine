@@ -50,3 +50,6 @@ Feature: Clones and the walk's subprocess
     Then there are 2 rows, and "github.secret:X" is unknown, observed at the walk's start
     And the file decodes to the same rows, and the same rows make the same file
     And its place is "inbox/need-states/2026-11-10/060000-sustenaut.svc.svc-"
+
+  Scenario: Head names are flat lower case and short
+    Then head names are flat lower case and short

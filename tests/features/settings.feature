@@ -87,3 +87,6 @@ Feature: The services, and the engine's settings
   Scenario: The Google pool and the pod's two token files are settings
     Given the setting CONVERGENCE_GOOGLE_POOL is "projects/1/locations/global/workloadIdentityPools/convergence"
     Then the Google read token file is "/var/run/secrets/google-read/token"
+
+  Scenario: The pod module builds nothing without its settings
+    Then the pod module builds nothing without its settings
