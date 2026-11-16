@@ -27,11 +27,20 @@ SITE = "https://convergence.example"
 WHO = "someone@example.org"
 ISSUER = "https://token.actions.githubusercontent.com"
 REPOSITORY = "Sustenaut/notifier"
-SA_TOKEN = "a-serviceaccount-token"
+CLUSTER_ISSUER = "https://kubernetes.default.svc.cluster.local"
 
 
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def cluster_token(subject: str) -> str:
+    """A token shaped as the cluster's (its issuer); the faked TokenReview says whose it is."""
+    claims = {"iss": CLUSTER_ISSUER, "sub": subject, "aud": [SITE]}
+    return f"{_b64(b'{\"alg\":\"RS256\"}')}.{_b64(json.dumps(claims).encode())}.c2ln"
+
+
+SA_TOKEN = cluster_token("system:serviceaccount:integrations:app")
 
 
 class Keys:
@@ -73,8 +82,8 @@ class Cluster:
 
     def __init__(self) -> None:
         self.known = {SA_TOKEN: "system:serviceaccount:integrations:app",
-                      "another-serviceaccount": "system:serviceaccount:notifier:app",
-                      "a-person": "someone"}
+                      cluster_token("system:serviceaccount:notifier:app"): "system:serviceaccount:notifier:app",
+                      cluster_token("someone"): "someone"}
         self.down = False
         self.asked: list[dict] = []
 

@@ -40,6 +40,8 @@ KEYS_SECONDS = 3600  # how long the JWKS is reused
 RETRY_SECONDS = 60  # an unknown key fetches the JWKS again, at most this often
 LEEWAY = 60  # clock skew allowed on exp and nbf
 SA_PREFIX = "system:serviceaccount:"
+# The k3s server's ServiceAccount token issuer (shared-infra's infra/k8s-jwks.json).
+CLUSTER_ISSUER = "https://kubernetes.default.svc.cluster.local"
 
 
 class Refused(Exception):
@@ -220,20 +222,22 @@ def review_post(host: str, port: str, token_file: str, ca_file: str,
 
 
 class Callers:
-    """Tells which of the two a bearer token is: a JWT whose issuer is GitHub's is a run's,
-    anything else goes to the cluster's TokenReview (when there is one)."""
+    """Tells which of the two a bearer token is, by its JWT's issuer: GitHub's is a run's,
+    the cluster's goes to the cluster's TokenReview (when there is one), and anything else
+    is refused without asking anyone."""
 
-    def __init__(self, github: GitHubOIDC, cluster: TokenReview | None):
-        self.github, self.cluster = github, cluster
+    def __init__(self, github: GitHubOIDC, cluster: TokenReview | None, cluster_issuer: str = CLUSTER_ISSUER):
+        self.github, self.cluster, self.cluster_issuer = github, cluster, cluster_issuer
 
     def verify(self, authorization: str) -> Requester:
         scheme, _, token = authorization.strip().partition(" ")
         token = token.strip()
         if scheme.lower() != "bearer" or not token:
             raise Refused(401, "no-token")
-        if self._issuer(token) == ISSUER:
+        issuer = self._issuer(token)
+        if issuer == ISSUER:
             return self.github.verify(token)
-        if self.cluster is None:
+        if self.cluster is None or issuer != self.cluster_issuer:
             raise Refused(401, "bad-token")
         return self.cluster.verify(token)
 

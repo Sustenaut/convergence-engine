@@ -77,6 +77,11 @@ Feature: Requests a person approves first
       | a token of a user, not a ServiceAccount  | a gate   | 403    | not-a-requester    |
       | a token while the cluster is down        | a gate   | 503    | review-unavailable |
 
+  Scenario: A token of neither GitHub's nor the cluster's issuer is refused without asking the cluster
+    When a GitHub run asks for a gate with a token of another issuer
+    Then the answer is 401 refusing "bad-token"
+    And the cluster was not asked
+
   Scenario: Without a cluster only GitHub's tokens count
     Given the engine has no TokenReview
     When the ServiceAccount integrations:app asks for a gate with the plan "x"
@@ -93,8 +98,10 @@ Feature: Requests a person approves first
     Then the page shows the plan escaped and the buttons
     When the person approves it
     Then the run's poll says "approved"
+    And the poll answer holds no email
     And the journal holds 2 events, "awaiting", "approved"
     And nothing was walked for it
+    And the approved gate has left the open requests, in the next journal event too
 
   Scenario: Another identity's poll is refused
     Given a GitHub run asked for a gate with the plan "x"
@@ -121,6 +128,7 @@ Feature: Requests a person approves first
     And the journal holds 5 events, "planning", "awaiting", "approved", "running", "done"
     And every event names the request, its plan's sha256, and no value
     And the run's poll says "done" with "k8s.secret:s" ready
+    And the poll answer holds no email
 
   Scenario: A plan that changed since the approval fails and fulfils nothing
     Given a GitHub run asked for a fulfil of the unit "notifier"

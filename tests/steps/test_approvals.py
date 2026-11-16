@@ -19,7 +19,7 @@ from convergence.journals import Journals
 from convergence.page import create_app
 
 from .fakes import Storage, journal
-from .world import ISSUER, REPOSITORY, SA_TOKEN, SITE, WHO, World, person
+from .world import ISSUER, REPOSITORY, SA_TOKEN, SITE, WHO, World, cluster_token, person
 
 scenarios("approvals.feature")
 
@@ -229,9 +229,9 @@ def run_posts(world: World, body: str) -> None:
 
 
 ACCOUNTS = {"the ServiceAccount integrations:app": SA_TOKEN,
-            "the ServiceAccount notifier:app": "another-serviceaccount",
-            "a token the cluster does not know": "unknown-token",
-            "a token of a user, not a ServiceAccount": "a-person",
+            "the ServiceAccount notifier:app": cluster_token("system:serviceaccount:notifier:app"),
+            "a token the cluster does not know": cluster_token("system:serviceaccount:gone:app"),
+            "a token of a user, not a ServiceAccount": cluster_token("someone"),
             "a token while the cluster is down": SA_TOKEN}
 
 
@@ -642,3 +642,25 @@ def request_page_says(world: World, text: str) -> None:
 @then(parsers.parse('the plan says "{need}" is "{change}"'))
 def plan_says(world: World, need: str, change: str) -> None:
     assert {n["need"]: n["change"] for n in world.ask.plan}[need] == change
+
+
+@then("the poll answer holds no email")
+def poll_no_email(world: World) -> None:
+    _poll(world, world.token())
+    answer = world.answer.json()
+    assert "approver" not in answer and WHO not in world.answer.text and "@" not in world.answer.text
+
+
+@then("the approved gate has left the open requests, in the next journal event too")
+def gate_left_open(world: World) -> None:
+    gate = world.ask
+    assert gate.ended and gate in world.approvals.listed()[1]
+    assert _post(world, world.token(), {"kind": "gate", "plan": "next"}).status_code == 201
+    last = world.storage.events()[-1]
+    assert gate.id not in [a["id"] for a in last["open"]] and gate.id in [a["id"] for a in last["ended"]]
+    assert [a["approver"] for a in last["ended"] if a["id"] == gate.id] == [WHO]
+
+
+@then("the cluster was not asked")
+def cluster_not_asked(world: World) -> None:
+    assert world.cluster.asked == []

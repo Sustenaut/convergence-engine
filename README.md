@@ -73,7 +73,7 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 | Path | What |
 |---|---|
 | `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
-| `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s |
+| `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
 The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
 string from a walk or a caller escaped.
@@ -82,7 +82,7 @@ string from a walk or a caller escaped.
 (`approvals.py`). A `fulfil` runs `./pubdeploy walk --fulfil --yes --unit U` once
 approved; a `gate` ends at approved, and its caller goes on by itself. States only move
 forward: `planning` (a fulfil's plan walk) → `awaiting` → `approved` | `declined` |
-`expired` (after `CONVERGENCE_REQUEST_HOURS`, 24); a fulfil then `running` → `done` |
+`expired` (after `CONVERGENCE_REQUEST_HOURS`, 24); a gate has ended once approved; a fulfil then `running` → `done` |
 `failed`. A fulfil's plan is a read-only walk of the unit (`check --unit U`) on
 arrival: each need that is not ready, by name, type, state and grade, and what its
 fulfil changes, names only. The approval is bound to the plan's sha256: the unit is
@@ -100,7 +100,9 @@ Who may ask (`callers.py`), with `Authorization: Bearer`:
   token's own repository's units;
 - a **Kubernetes ServiceAccount's token** (audience the same), checked by the cluster's
   TokenReview, for the ServiceAccounts `CONVERGENCE_REQUESTERS` lists
-  (`integrations:app`); gates only;
+  (`integrations:app`); gates only. Only a JWT whose issuer is the cluster's
+  (`https://kubernetes.default.svc.cluster.local`) is sent to the TokenReview; any
+  other token is refused without asking;
 - a **person**: the Fulfil button is their request and their approval in one.
 
 **Approve and Decline** are for a person with the role `convergence` (oauth2-proxy's

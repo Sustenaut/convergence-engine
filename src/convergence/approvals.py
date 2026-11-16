@@ -12,6 +12,9 @@ A request moves forward only, one state at a time:
     awaiting -> approved | declined | expired                  (CONVERGENCE_REQUEST_HOURS, 24)
     approved -> running -> done | failed                       (fulfil; a gate ends at approved)
 
+A gate that is approved has ended: it leaves the open requests (and every later
+event's open list) for the ended ones.
+
 A fulfil's plan is a read-only walk of the unit (`check --unit U`) on arrival: each
 need that is not ready, by name, type, state and grade, with one line on what its
 fulfil changes. Names and states only, never a value. The approval is bound to the
@@ -142,7 +145,7 @@ class Ask:
 
     @property
     def ended(self) -> bool:
-        return self.state in ENDED
+        return self.state in ENDED or (self.kind == "gate" and self.state == "approved")
 
     @property
     def run_url(self) -> str:
@@ -286,6 +289,7 @@ class Approvals:
 
     def _thread(self, target: Callable[[Ask], None], ask: Ask) -> None:
         thread = threading.Thread(target=target, args=(ask,), daemon=True, name=f"request {ask.id}")
+        self.threads = [t for t in self.threads if t.is_alive()]  # the ended ones' are dropped
         self.threads.append(thread)
         thread.start()
 
@@ -404,9 +408,11 @@ class Approvals:
                 sorted((a for a in asks if a.ended), key=lambda a: a.changes[-1]["at"], reverse=True)[:KEEP_ENDED])
 
     def answer(self, ask: Ask, site: str) -> dict[str, Any]:
-        """What a polling caller is told: the state and the result's summary, names only."""
+        """What a polling caller is told: the state and the result's summary, names only. Never
+        who approved it: a workflow prints this in its run's log, public on a public repository,
+        and an email stays on the page and in the journal."""
         return {"id": ask.id, "kind": ask.kind, "state": ask.state, "repository": ask.repository, "unit": ask.unit,
                 "plan_sha256": ask.plan_sha256, "url": f"{site}/approvals/{ask.id}",
-                "expires_at": _iso(ask.expires_at), "approver": ask.approver,
+                "expires_at": _iso(ask.expires_at),
                 "result": {"needs": ask.needs, "error": ask.error}}
 
