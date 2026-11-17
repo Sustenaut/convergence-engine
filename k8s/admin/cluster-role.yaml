@@ -3,7 +3,7 @@
 # write, no delete, no exec, no nodes, and no Secret: those it reads only in the
 # namespaces secret-readers.yaml lists. Step 4b adds the writes the fulfils need, in a
 # reviewed change of its own.
-# Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests).
+# Applied by the deploy walk over the admin channel (pubrules.json's k8s.manifests).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

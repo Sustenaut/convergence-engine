@@ -37,7 +37,7 @@ Feature: Clones and the walk's subprocess
   Scenario: A repository without ./pubdeploy is not walked
     Given a clone of Sustenaut/svc without ./pubdeploy
     When it is walked
-    Then the walk failed with "the repository has no ./pubdeploy: its pubkit sync has not run with a deploy block"
+    Then the walk failed with "the repository has no ./pubdeploy: its pubrules sync has not run with a deploy block"
 
   Scenario: Journals that are not deploy-journal/2 are no journals
     Given a clone of Sustenaut/svc whose walk prints '[{"schema": "other"}]'

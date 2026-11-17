@@ -51,13 +51,13 @@
     "providers": [
       {
         "distribution": "pubdeploy",
-        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.0/pubdeploy-0.4.0-py3-none-any.whl",
-        "sha256": "85d33414775c8d793f65001fb9e4b399f57aea4cb0c48c0e56aa5931b4f2ad8c"
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl",
+        "sha256": "320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd"
       },
       {
         "distribution": "pubsec",
-        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.2.1/pubsec-0.2.1-py3-none-any.whl",
-        "sha256": "8556965437fe6486ac8df901644063c6ed86107ab09407f799ac392b6a3bab4f"
+        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl",
+        "sha256": "a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18"
       }
     ],
     "namespace": "convergence",

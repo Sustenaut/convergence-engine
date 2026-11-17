@@ -11,7 +11,7 @@
     "actions_variables": "write",
     "environments": "write"
   },
-  "pubkit": {
+  "pubrules": {
     "org": "Sustenaut",
     "bitwarden_project": "Sustenaut",
     "secret_prefix": "convergence"

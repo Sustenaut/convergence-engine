@@ -111,7 +111,7 @@ def walk(repository: str, clone: Path, zones: str | None, journal: str, credenti
          fulfil_unit: str | None = None, unit: str | None = None) -> Walk:
     result = Walk(repository, now().strftime("%Y-%m-%dT%H:%M:%SZ"))
     if not (clone / "pubdeploy").is_file():
-        result.error = "the repository has no ./pubdeploy: its pubkit sync has not run with a deploy block"
+        result.error = "the repository has no ./pubdeploy: its pubrules sync has not run with a deploy block"
         return result
     through_pubsec = bool(credentials.bitwarden_token) and (clone / "pubsec").is_file()
     started = clock()
