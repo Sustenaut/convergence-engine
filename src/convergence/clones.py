@@ -1,7 +1,7 @@
 """Shallow clones of the default branches, refreshed before each walk.
 
 Clones sit side by side, <work>/clones/<owner>/<name>, so a service's
-`--zones ../shared-infra/pubkit.json` finds its owner's zones repository the
+`--zones ../shared-infra/pubrules.json` finds its owner's zones repository the
 way it does on a laptop. The installation token reaches git as an
 Authorization header in git's environment (GIT_CONFIG_*), never in a remote URL,
 a command line or .git/config, so nothing on disk holds it.

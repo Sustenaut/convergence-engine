@@ -3,7 +3,7 @@
     {"owner": "Sustenaut",
      "repos": {"notifier": {"board": true, "protect": true, "govern": true, "deploy": true}}}
 
-The state says whether a repository is walked; the repository's own pubkit.json
+The state says whether a repository is walked; the repository's own pubrules.json
 deploy block says how. A name with a slash is another owner's repository.
 """
 

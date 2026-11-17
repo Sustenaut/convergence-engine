@@ -124,7 +124,7 @@ Feature: Requests a person approves first
     And the plan walk ran "check --unit notifier" as the run's repository
     When the person approves it and the walk makes it ready
     Then the request ends "done" with "k8s.secret:s" ready
-    And the Fulfil walk ran with PUBKIT_WALK_BY the person
+    And the Fulfil walk ran with PUBRULES_WALK_BY the person
     And the journal holds 5 events, "planning", "awaiting", "approved", "running", "done"
     And every event names the request, its plan's sha256, and no value
     And the run's poll says "done" with "k8s.secret:s" ready

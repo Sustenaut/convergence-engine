@@ -21,7 +21,7 @@ NAMESPACED = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?:[a-z0-9]([a-z0-9.-]*[a-z
 class Settings:
     # The state repositories, OWNER/NAME each: their state.json lists the services.
     states: tuple[str, ...]
-    # Per owner, the repository whose pubkit.json keeps that owner's hosting zones.
+    # Per owner, the repository whose pubrules.json keeps that owner's hosting zones.
     zones: dict[str, str]
     storage_url: str
     # The projected service-account token, audience storage.sustenaut.eu.

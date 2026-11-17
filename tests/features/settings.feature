@@ -4,7 +4,7 @@ Feature: The services, and the engine's settings
   the role deploy. The engine's settings come from its environment, each checked.
 
   Scenario: Only the repositories with the role are services, in name order
-    Given a state file '{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}, "Auth": {"deploy": true}, "pubkit": {"board": true}, "maps": {"deploy": "yes"}, "schryer/visit-ee": {"deploy": true}, "odd": []}}'
+    Given a state file '{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}, "Auth": {"deploy": true}, "pubrules": {"board": true}, "maps": {"deploy": "yes"}, "schryer/visit-ee": {"deploy": true}, "odd": []}}'
     When I list its services
     Then the services are "schryer/visit-ee, Sustenaut/Auth, Sustenaut/notifier"
 

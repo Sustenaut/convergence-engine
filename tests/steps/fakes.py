@@ -39,7 +39,6 @@ class Runner:
         self.fulfils: dict[str, Ran] = {}  # what a --fulfil walk prints, when it differs from a check
         self.failing: dict[str, str] = {}  # repository -> git's last words
         self.states: dict[str, str] = {}  # state repository -> state.json
-        self.files: dict[str, dict[str, str]] = {}  # repository -> files its clone holds
 
     def __call__(self, argv: list[str], cwd: Path, env, timeout: float) -> Ran:
         self.calls.append((list(argv), cwd, dict(env)))
@@ -55,13 +54,11 @@ class Runner:
             else:
                 (dest / "pubdeploy").write_text("#!/bin/sh\n")
                 (dest / "pubsec").write_text("#!/bin/sh\n")
-            for name, text in self.files.get(slug, {}).items():
-                (dest / name).write_text(text)
             return Ran(0, "", "")
         slug = f"{cwd.parent.name}/{cwd.name}"
         if "--fulfil" in argv and slug in self.fulfils:
             return self.fulfils[slug]
-        return self.walks.get(slug, Ran(2, "", "pubdeploy: deploy: pubkit.json has no deploy block\n"))
+        return self.walks.get(slug, Ran(2, "", "pubdeploy: deploy: pubrules.json has no deploy block\n"))
 
     def walk_prints(self, repository: str, documents: Any, code: int = 0, stderr: str = "") -> None:
         self.walks[repository] = Ran(code, json.dumps(documents), stderr)

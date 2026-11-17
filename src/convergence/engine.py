@@ -10,7 +10,7 @@ asked for while one runs is not started.
 A Fulfil is one approved request's walk of one unit with --fulfil (approvals.py):
 never while the same service is being walked (by a round or another request), with
 the installation token that may write and the Bitwarden write token's file, which no
-round ever gets. The journal says who approved it (PUBKIT_WALK_BY, their email).
+round ever gets. The journal says who approved it (PUBRULES_WALK_BY, their email).
 """
 
 from __future__ import annotations
