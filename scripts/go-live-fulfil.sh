@@ -25,8 +25,8 @@ ask "Done?" || { echo "go-live: the write token first, then run this again"; exi
 
 step "The walk applies k8s/admin/write-role.yaml (the write role and its admission policy) and fills Secret convergence-bitwarden-write."
 if ask "Run ./with-secrets ./pubdeploy walk --fulfil --server sustenaut now?"; then
-  [[ -f ../shared-infra/pubkit.json ]] || { echo "go-live: ../shared-infra is not checked out beside this repository" >&2; exit 1; }
-  ./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
+  [[ -f ../shared-infra/pubrules.json ]] || { echo "go-live: ../shared-infra is not checked out beside this repository" >&2; exit 1; }
+  ./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubrules.json
 fi
 
 step "Prove the admission policy: the engine's writes are refused in kube-system and allowed in a service's namespace."

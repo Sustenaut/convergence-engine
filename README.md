@@ -16,7 +16,7 @@ A round runs at start and then every 30 minutes, one service after another:
 1. **The list.** It refreshes a shallow clone of each state repository
    (`CONVERGENCE_STATES`, by default `Sustenaut/release-state`) and takes every
    repository whose entry has the role `deploy`. The state says whether a repository
-   is walked; its own `pubkit.json` deploy block says how.
+   is walked; its own `pubrules.json` deploy block says how.
 2. **The clones.** Each owner's zones repository (`CONVERGENCE_ZONES`, by default
    Sustenaut's `shared-infra`) and each service are shallow clones of their default
    branch, side by side under `/work/clones/OWNER/`, refreshed before each walk.
@@ -26,13 +26,13 @@ A round runs at start and then every 30 minutes, one service after another:
 3. **The walk.** In the service's clone it runs the repository's own pubdeploy:
 
    ```sh
-   ./pubdeploy check --json --journal https://storage.sustenaut.eu --zones ../shared-infra/pubkit.json
+   ./pubdeploy check --json --journal https://storage.sustenaut.eu --zones ../shared-infra/pubrules.json
    ```
 
    through `./pubsec run --` when there is a Bitwarden read token, so the walk uses
    the pubdeploy, pubsec and need types that repository pins, never the engine's.
    `check` is a walk that cannot fulfil. kubectl runs as the pod's ServiceAccount
-   (pubdeploy's `plane` channel, `PUBKIT_PLANE`), with the reads
+   (pubdeploy's `plane` channel, `PUBRULES_PLANE`), with the reads
    `k8s/admin/cluster-role.yaml` grants and, in the namespaces
    `k8s/admin/secret-readers.yaml` lists, Secrets' key names and lengths. That file
    is generated from the service list, with every service checked out beside this
@@ -125,7 +125,7 @@ Who may ask (`callers.py`), with `Authorization: Bearer`:
 `X-Forwarded-Email` and `X-Forwarded-Groups`, which only the proxy can set: the network
 policy lets nothing else reach the engine). The form carries a token made from that
 person, the request and its plan's hash, and must come from this site (`Origin`). A
-fulfil's walk records the approver (`PUBKIT_WALK_BY`).
+fulfil's walk records the approver (`PUBRULES_WALK_BY`).
 
 **The record.** Every state change appends one event (`convergence-approval/1`: id,
 kind, state, at, by, repository, unit, sha, run url, plan sha256, the end states'
@@ -148,7 +148,7 @@ deploy channel needs a kubeconfig on the node that only `sustenaut-app` writes.
 
 Every credential is a file mounted in the pod, read when used, and handed to a walk's
 subprocess in an environment built from nothing (PATH, HOME, the cluster's address,
-`GH_TOKEN`, `PUBKIT_STORAGE_TOKEN`, `PUBKIT_WALK_BY`, and `BWS_ACCESS_TOKEN` when
+`GH_TOKEN`, `PUBRULES_STORAGE_TOKEN`, `PUBRULES_WALK_BY`, and `BWS_ACCESS_TOKEN` when
 there is one). No value is on a command line, in a remote URL or in a log.
 Through `./pubsec run`, a walk's child process also gets every value the walked
 repository's with-secrets.json project gives it, as deploy-check.yml's walk does on
@@ -174,7 +174,7 @@ observability's `OBSERVABILITY_SENDERS`, so rounds that stop show as `sender_sil
 | Variable | Default | What |
 |---|---|---|
 | `CONVERGENCE_STATES` | `Sustenaut/release-state` | the state repositories, comma-separated |
-| `CONVERGENCE_ZONES` | `{"Sustenaut": "Sustenaut/shared-infra"}` | per owner, the repository whose pubkit.json keeps the hosting zones |
+| `CONVERGENCE_ZONES` | `{"Sustenaut": "Sustenaut/shared-infra"}` | per owner, the repository whose pubrules.json keeps the hosting zones |
 | `CONVERGENCE_EVERY_MINUTES` | `30` | how often a round starts |
 | `CONVERGENCE_WALK_SECONDS` | `600` | how long one walk may take |
 | `CONVERGENCE_STORAGE_URL` | `https://storage.sustenaut.eu` | storage |
@@ -207,5 +207,5 @@ are `scripts/go-live-fulfil.sh`.
 ```sh
 make venv
 make functional   # the Gherkin suite, 100% line coverage
-make check        # and pubkit sync --check
+make check        # and pubrules sync --check
 ```

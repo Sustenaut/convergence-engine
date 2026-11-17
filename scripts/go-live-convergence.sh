@@ -30,6 +30,6 @@ ask "Done?" || echo "   Left for later: the engine walks without it."
 
 step "The engine's first walk of itself, from this laptop over the admin channel: the namespace, the admin manifests, the Secrets, the sign-in client, the gate."
 if ask "Run ./with-secrets ./pubdeploy walk --fulfil --server sustenaut now?"; then
-  [[ -f ../shared-infra/pubkit.json ]] || { echo "go-live: ../shared-infra is not checked out beside this repository" >&2; exit 1; }
-  ./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
+  [[ -f ../shared-infra/pubrules.json ]] || { echo "go-live: ../shared-infra is not checked out beside this repository" >&2; exit 1; }
+  ./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubrules.json
 fi

@@ -5,7 +5,7 @@
 # Nothing else: no other delete, no exec, no RBAC (so no escalate or bind), no namespaces
 # (k8s.namespace stays an admin's step), and no Secret read beyond secret-readers.yaml.
 # Rounds use the same identity, but run `pubdeploy check`, which writes nothing.
-# Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests).
+# Applied by the deploy walk over the admin channel (pubrules.json's k8s.manifests).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

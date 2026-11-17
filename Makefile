@@ -18,9 +18,9 @@ functional: ## The Gherkin suite, with its coverage in coverage/coverage.xml
 	COVERAGE_FILE=coverage/.coverage .venv/bin/coverage xml -q -o coverage/coverage.xml
 
 lock: ## Pin tests/requirements.txt with hashes
-	.venv/bin/pubkit lock
+	.venv/bin/pubrules lock
 
-sync-check: ## Fail if pubkit's managed files drifted
-	./pubkit sync --check
+sync-check: ## Fail if pubrules's managed files drifted
+	./pubrules sync --check
 
 check: sync-check functional ## Everything CI runs

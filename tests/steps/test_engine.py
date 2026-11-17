@@ -76,6 +76,11 @@ def zones_are(world: World, text: str) -> None:
     world.env["CONVERGENCE_ZONES"] = text
 
 
+@given(parsers.parse("{slug} still keeps its zones in pubkit.json"))
+def zones_in_pubkit_json(world: World, slug: str) -> None:
+    world.runner.files[slug] = {"pubkit.json": "{}"}
+
+
 @given(parsers.re(r'the walk of (?P<slug>\S+) finds "(?P<a>[^"]+)" (?P<sa>\w+)( and "(?P<b>[^"]+)" (?P<sb>\w+))?$'))
 def walk_finds(world: World, slug: str, a: str, sa: str, b: str | None, sb: str | None) -> None:
     states = {a: sa, **({b: sb} if b else {})}
@@ -201,6 +206,8 @@ def walked_with(world: World, slug: str, command: str) -> None:
     env = world.env_of(slug)
     assert "SECRET" not in env and env["PUBKIT_PLANE"] == "1" and env["GH_TOKEN"] == "ghs_installation"
     assert env["PUBKIT_STORAGE_TOKEN"] == "storage-token" and env["PUBKIT_WALK_BY"] == "schedule"
+    assert env["PUBRULES_PLANE"] == "1" and env["PUBRULES_STORAGE_TOKEN"] == "storage-token"
+    assert env["PUBRULES_WALK_BY"] == "schedule"
     assert all("ghs_" not in a and "token" not in a for argv, _, _ in world.runner.calls for a in argv)
 
 

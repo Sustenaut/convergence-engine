@@ -1,6 +1,6 @@
 # The functional suite's direct dependencies. Exact pins only; the resolved
-# set with hashes lives in requirements.lock. Regenerate it with `pubkit lock`.
--r requirements-pubkit.txt
+# set with hashes lives in requirements.lock. Regenerate it with `pubrules lock`.
+-r requirements-pubrules.txt
 -r ../requirements.in
 # `make functional` measures the suite.
 coverage==7.16.2
