@@ -47,6 +47,8 @@ Feature: The services, and the engine's settings
       | CONVERGENCE_ZONES         | {"a": 1}            | CONVERGENCE_ZONES is a JSON object, owner to OWNER/NAME |
       | CONVERGENCE_ZONES         | {"a": "b"}          | CONVERGENCE_ZONES is OWNER/NAME, not 'b'                |
       | CONVERGENCE_EVERY_MINUTES | 1                   | CONVERGENCE_EVERY_MINUTES is at least 5                 |
+      | CONVERGENCE_REQUEST_HOURS | 0                   | CONVERGENCE_REQUEST_HOURS is 1 to 168                   |
+      | CONVERGENCE_REQUESTERS    | integrations        | CONVERGENCE_REQUESTERS is NAMESPACE:NAME, comma-separated |
 
   Scenario: `python -m convergence services` prints a state file's services
     Given a state file '{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}}}' on disk
@@ -87,6 +89,12 @@ Feature: The services, and the engine's settings
   Scenario: The Google pool and the pod's two token files are settings
     Given the setting CONVERGENCE_GOOGLE_POOL is "projects/1/locations/global/workloadIdentityPools/convergence"
     Then the Google read token file is "/var/run/secrets/google-read/token"
+
+  Scenario: Requests have their own settings
+    Given the setting CONVERGENCE_REQUESTERS is "integrations:app, notifier:app"
+    And the setting CONVERGENCE_REQUEST_OWNERS is "Sustenaut, schryer"
+    And the setting CONVERGENCE_REQUEST_HOURS is "12"
+    Then the requests settings are 12 hours, owners "Sustenaut, schryer" and requesters "integrations:app, notifier:app"
 
   Scenario: The pod module builds nothing without its settings
     Then the pod module builds nothing without its settings

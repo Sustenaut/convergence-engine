@@ -82,6 +82,10 @@
         "path": "k8s/admin/network-policy.yaml"
       },
       {
+        "type": "k8s.manifests",
+        "path": "k8s/admin/token-review.yaml"
+      },
+      {
         "type": "bitwarden.generated",
         "name": "convergence-cookie-secret",
         "shape": "oauth2-proxy-cookie",

@@ -4,7 +4,14 @@
 # convergence-oidc).
 # It lets in only people with the role convergence, from the token's access claim
 # (the team access page at auth.sustenaut.eu/realms/team/access is the one list).
-# Open without sign-in: /healthz.
+# Open without sign-in: /healthz, and the callers' /requests (POST /requests and
+# GET /requests/ID), which the engine lets in by their bearer token alone (callers.py)
+# and where it reads no X-Forwarded-* header.
+# What the engine needs of this proxy: on signed-in routes, X-Forwarded-Email and
+# X-Forwarded-Groups (the role convergence, from the access claim), which the
+# Fulfil, Approve and Decline buttons require; on /requests, the caller's own
+# Authorization header passed through unchanged (no --pass-authorization-header or
+# --skip-jwt-bearer-tokens, which would replace or consume it).
 apiVersion: v1
 kind: Service
 metadata:
@@ -59,6 +66,8 @@ spec:
             - --cookie-samesite=lax
             - --skip-provider-button=true
             - --skip-auth-route=GET=^/healthz$
+            - --skip-auth-route=POST=^/requests$
+            - --skip-auth-route=GET=^/requests/[0-9A-Za-z-]+$
             - --silence-ping-logging=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID

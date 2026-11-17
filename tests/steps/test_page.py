@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from convergence.approvals import Approvals, Ledger
 from convergence.clones import Clones
 from convergence.config import settings
 from convergence.engine import Engine, Service
@@ -28,7 +29,8 @@ class World:
         self.engine = Engine(settings({"CONVERGENCE_WORK": str(tmp)}), Clones(tmp), lambda: "t", None,
                              base_env={}, clock=lambda: self.now)
         self.storage = Storage()
-        self.client = TestClient(create_app(self.engine, Journals(self.storage)))
+        self.client = TestClient(create_app(self.engine, Journals(self.storage),
+                                            Approvals(self.engine, Ledger(self.storage), log=lambda line: None)))
         self.answer = None
 
 

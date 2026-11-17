@@ -24,6 +24,8 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
     from integrations.storage_sink import StorageSink
 
     from . import facts, journals
+    from .approvals import Approvals, Ledger
+    from .callers import Callers, GitHubOIDC, TokenReview, jwks_from, review_post
     from .clones import Clones
     from .config import settings
     from .engine import Engine, prepare, read_secret
@@ -44,9 +46,18 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
             if k in os.environ}
     engine = Engine(s, Clones(s.work, base_env=base), tokens.read, plane.for_tenant(facts.TENANT), base_env=base,
                     fulfil_token=tokens.write)
+    # Fail closed: a head storage will not read stops the start, so no request is lost.
+    approvals = Approvals(engine, Ledger(plane), hours=s.request_hours)
+    approvals.start()
+    account = "/var/run/secrets/kubernetes.io/serviceaccount"
+    cluster = TokenReview(review_post(os.environ["KUBERNETES_SERVICE_HOST"], os.environ["KUBERNETES_SERVICE_PORT"],
+                                      f"{account}/token", f"{account}/ca.crt"), s.site, s.requesters) \
+        if s.requesters and "KUBERNETES_SERVICE_HOST" in os.environ else None
+    callers = Callers(GitHubOIDC(jwks_from(caller), s.site, s.request_owners), cluster)
     stop = threading.Event()
     threading.Thread(target=engine.loop, args=(stop,), daemon=True, name="rounds").start()
-    return create_app(engine, journals.Journals(plane))
+    threading.Thread(target=approvals.loop, args=(stop,), daemon=True, name="expiry").start()
+    return create_app(engine, journals.Journals(plane), approvals, callers, site=s.site)
 
 
 app = build() if os.environ.get("CONVERGENCE_SERVE") else None

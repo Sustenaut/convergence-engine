@@ -5,7 +5,9 @@ page per service at <https://convergence.sustenaut.eu>, and journals every walk.
 
 It is the second host for `pubdeploy walk`, beside the laptop, with its own narrower
 credentials. This is step 4a of the operating plane (the phase 4 spec): it reads and
-changes nothing. Fulfilling from the page is step 4b, and Google keys step 4c.
+changes nothing. Fulfilling from the page is step 4b, Google keys step 4c, and
+requests a person approves on the page (for go-live workflows and other callers) the
+step after.
 
 ## What it does
 
@@ -58,20 +60,69 @@ Behind oauth2-proxy and the team sign-in, for people with the role `convergence`
 | `/` | every service, each unit's counts, its last walk, and a failure if the latest try failed |
 | `/services/OWNER/NAME` | each unit's needs: type, grade, state, when checked, what was found, and what makes it ready (the proposal or the person's step, or for an auto need the Fulfil button); and the unit's walks |
 | `/services/OWNER/NAME/walks/HASH` | one journaled walk, from storage |
-| `POST /services/OWNER/NAME/fulfil` | a person's Fulfil of one unit (the button) |
-| `/fulfils/ID` | what that Fulfil printed, as pubdeploy prints it (names and states), and how it ended; it reloads itself while it runs |
+| `POST /services/OWNER/NAME/fulfil` | a person's Fulfil of one unit (the button): a request of theirs, which they approve once its plan is walked |
+| `/approvals` | the open requests, oldest first, then the last 50 ended: kind, repository and unit (or the caller), who asked, age and state; the front page links here with the number awaiting |
+| `/approvals/ID` | one request: its plan and the plan's sha256, where it came from (with a link to the GitHub run), Approve and Decline while it awaits, each state change with who and when, and a Fulfil's output and end states; it reloads itself while it works |
+| `POST /approvals/ID` | a person's Approve or Decline |
+| `/fulfils/ID` | 4b's links: redirects to `/approvals/ID` |
 | `/healthz` | open; 200 while rounds end in time |
 
-They are plain HTML with no script, `Cache-Control: private, no-store`, and every
-string from a walk escaped.
+Open without the sign-in, for callers with a bearer token (oauth2-proxy's
+`--skip-auth-route`; the engine reads no `X-Forwarded-*` header there):
 
-**Fulfil** (step 4b) is the one thing a page does: `./pubdeploy walk --fulfil --yes
---unit U` in the service's clone, which makes each auto need that is missing or
-drifted. The person is oauth2-proxy's `X-Forwarded-Email`, which only the proxy can
-set (the network policy lets nothing else reach the engine), and the journal records
-them (`PUBKIT_WALK_BY`). The form carries a token made from that person, the service
-and the unit, and the request must come from this site (`Origin`). A service is never
-fulfilled while it is being walked, by a round or another Fulfil, and a Fulfil may take
+| Path | What |
+|---|---|
+| `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
+| `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
+
+The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
+string from a walk or a caller escaped.
+
+**Requests.** A request is something a caller wants done that a person approves first
+(`approvals.py`). A `fulfil` runs `./pubdeploy walk --fulfil --yes --unit U` once
+approved; a `gate` ends at approved, and its caller goes on by itself. States only move
+forward: `planning` (a fulfil's plan walk) → `awaiting` → `approved` | `declined` |
+`expired` (after `CONVERGENCE_REQUEST_HOURS`, 24); a gate has ended once approved; a fulfil then `running` → `done` |
+`failed`. A fulfil's plan is a read-only walk of the unit (`check --unit U`) on
+arrival: each need that is not ready, by name, type, state and grade, and what its
+fulfil changes, names only. The approval is bound to the plan's sha256: the unit is
+walked read-only again just before the Fulfil, and if that plan differs the request
+ends `failed`, "plan changed since approval". A unit with nothing to do is `done` at
+once, with no approval. A gate's plan is the caller's text, 8 KB at most.
+
+Who may ask (`callers.py`), with `Authorization: Bearer`:
+
+- a **GitHub Actions OIDC token** (`id-token: write`, audience
+  `https://convergence.sustenaut.eu`), checked against GitHub's JWKS: its issuer, its
+  audience, its expiry, a repository owner in `CONVERGENCE_REQUEST_OWNERS`
+  (Sustenaut), and `ref` refs/heads/main. The run is recorded (repository,
+  repository_id, sha, workflow_ref, run_id, actor), and a fulfil may only name the
+  token's own repository's units;
+- a **Kubernetes ServiceAccount's token** (audience the same), checked by the cluster's
+  TokenReview, for the ServiceAccounts `CONVERGENCE_REQUESTERS` lists
+  (`integrations:app`); gates only. Only a JWT whose issuer is the cluster's
+  (`https://kubernetes.default.svc.cluster.local`) is sent to the TokenReview; any
+  other token is refused without asking;
+- a **person**: the Fulfil button is their request and their approval in one.
+
+**Approve and Decline** are for a person with the role `convergence` (oauth2-proxy's
+`X-Forwarded-Email` and `X-Forwarded-Groups`, which only the proxy can set: the network
+policy lets nothing else reach the engine). The form carries a token made from that
+person, the request and its plan's hash, and must come from this site (`Origin`). A
+fulfil's walk records the approver (`PUBKIT_WALK_BY`).
+
+**The record.** Every state change appends one event (`convergence-approval/1`: id,
+kind, state, at, by, repository, unit, sha, run url, plan sha256, the end states'
+need names and states; never a value) to storage's tenant `plane`, head
+`convergence.approvals`, before it counts. A request whose first event is refused is
+not taken (503 `journal-refused`), and an approval the journal refuses does not happen.
+Each event also holds the open requests and the last ended ones, so a new pod picks
+them up from the head: a request that was planning or running ends `failed`, and an
+approved fulfil runs.
+
+**Fulfil** (step 4b) runs in the service's clone and makes each auto need that is
+missing or drifted. A service is never walked by two at once: a request's walks wait
+for a round or another request to end, and a Fulfil may take
 `CONVERGENCE_FULFIL_SECONDS` (1200). Its walk alone gets the installation token that
 may write and the Bitwarden write token's file: every round mints a token limited to
 read and runs `check`, so it cannot write. `k8s.namespace` stays an admin's step: the
@@ -94,7 +145,9 @@ Actions: only the read account's token can read them, and only that child holds 
 | A read-only Bitwarden machine account's token (optional) | Bitwarden `convergence-bitwarden-read-token`; Secret `convergence-bitwarden` | `./pubsec run`, so the bitwarden.* needs are checked |
 | The write machine account's token, read and write on Sustenaut (optional) | Bitwarden `convergence-bitwarden-write-token`; Secret `convergence-bitwarden-write` | a Fulfil's walk alone, as `PUBSEC_WRITE_TOKEN_FILE`: `bitwarden.generated` and the other needs that write to Bitwarden |
 | Two projected tokens for Google, audiences `convergence-google-read` and `convergence-google-write` | `/var/run/secrets/google-read/token`, `/var/run/secrets/google-write/token` | gcloud's credential, without a key (`google.py`): traded through shared-infra's Workload Identity pool `convergence` for `convergence-key-reader` (rounds: list keys) or `convergence-key-admin` (a Fulfil alone: create keys), each on the listed accounts only; each path has its own gcloud directory |
-| The ServiceAccount itself | in-cluster | kubectl's reads; for a Fulfil, `k8s/admin/write-role.yaml`'s writes (Secrets, a Deployment's restart, a Job from a CronJob), refused in the system namespaces and its own by an admission policy |
+| The ServiceAccount itself | in-cluster | kubectl's reads; for a Fulfil, `k8s/admin/write-role.yaml`'s writes (Secrets, a Deployment's restart, a Job from a CronJob), refused in the system namespaces and its own by an admission policy; TokenReviews (`k8s/admin/token-review.yaml`), for the requests of listed ServiceAccounts |
+| GitHub's OIDC keys (public, no credential) | `https://token.actions.githubusercontent.com/.well-known/jwks`, through the integrations library (`github.actions-oidc`) | checking a run's request; reused for an hour, fetched again for a key not seen yet |
+| A caller's bearer token | the request's `Authorization` header | checked and dropped: never stored, logged or journaled |
 
 The engine's own calls (the token mint, storage) go to its call log through the
 integrations library, into `calls_convergence_engine`. It is an always-on sender in
@@ -109,6 +162,11 @@ observability's `OBSERVABILITY_SENDERS`, so rounds that stop show as `sender_sil
 | `CONVERGENCE_EVERY_MINUTES` | `30` | how often a round starts |
 | `CONVERGENCE_WALK_SECONDS` | `600` | how long one walk may take |
 | `CONVERGENCE_STORAGE_URL` | `https://storage.sustenaut.eu` | storage |
+| `CONVERGENCE_FULFIL_SECONDS` | `1200` | how long a Fulfil may take |
+| `CONVERGENCE_SITE` | `https://convergence.sustenaut.eu` | the site: forms' `Origin`, and the audience of a caller's token |
+| `CONVERGENCE_REQUEST_HOURS` | `24` | how long a request awaits a decision before it expires (1 to 168) |
+| `CONVERGENCE_REQUEST_OWNERS` | `Sustenaut` | the owners whose repositories' GitHub runs may ask, comma-separated |
+| `CONVERGENCE_REQUESTERS` | none (`integrations:app` in `k8s/engine.yaml`) | the ServiceAccounts, `NAMESPACE:NAME`, that may ask for a gate |
 | `CONVERGENCE_*_FILE`, `CONVERGENCE_GITHUB_APP_DIR` | as `k8s/engine.yaml` mounts them | the credentials |
 
 `python -m convergence services state.json` prints the services a state file lists.
