@@ -471,6 +471,7 @@ def no_fulfil(world: World) -> None:
 @then(parsers.parse('a second decision is refused, saying "{text}"'))
 def second_decision(world: World, text: str) -> None:
     assert text in world.approvals.decide(world.ask.id, WHO, True)
+    assert world.approvals.decide("nope", WHO, True) == "there is no such request"
 
 
 @when("25 hours pass")
@@ -664,3 +665,53 @@ def gate_left_open(world: World) -> None:
 @then("the cluster was not asked")
 def cluster_not_asked(world: World) -> None:
     assert world.cluster.asked == []
+
+
+@given(parsers.parse('the person\'s Fulfil of the unit "{unit}" has its plan and awaits its own approval'))
+def press_awaiting(world: World, unit: str) -> None:
+    ask = Ask("pressed", "fulfil", Requester("person", WHO, actor=WHO), REPOSITORY, unit, world.now,
+              world.now + 3600, approve_on_plan=WHO)
+    world.approvals._take(ask, "awaiting", plan=[], plan_sha256="0" * 64)  # noqa: SLF001 - held at awaiting
+    world.ask = ask
+
+
+@then("the page says the person pressed Fulfil and reloads itself")
+def says_pressed(world: World) -> None:
+    assert f"{WHO} pressed Fulfil" in world.answer.text and world.answer.headers["Refresh"] == "5"
+
+
+@when("the person approves it twice with the same form")
+def approves_twice(world: World) -> None:
+    form = _form(world)
+    _decide(world, "approve", form=form)
+    assert world.answer.status_code == 303
+    _decide(world, "approve", form=form)
+
+
+@then("the second answer sends them to the request's page")
+def second_answer(world: World) -> None:
+    assert world.answer.status_code == 303 and world.answer.headers["location"] == f"/approvals/{world.ask.id}"
+
+
+@when("another person declines it, and then the person approves it with the form they had")
+def other_declines_then(world: World) -> None:
+    form = _form(world)
+    other = person("other@example.org")
+    _decide(world, "decline", headers=other, form=dict(re.findall(
+        r'name="(token|plan)" value="([^"]+)"', _page(world, other).text)))
+    assert world.answer.status_code == 303
+    _decide(world, "approve", form=form)
+
+
+@when("the person presses Fulfil and the journal refuses its approval")
+def press_approval_refused(world: World) -> None:
+    _hold(world)
+    world.ask = world.approvals.press(REPOSITORY, "notifier", WHO)
+    world.storage.refuse_upload(2)  # the plan's event counts, the approval's does not
+    _release(world)
+
+
+@then("the request awaits a decision with the buttons, and the log says why")
+def awaits_with_buttons(world: World) -> None:
+    assert world.ask.state == "awaiting" and "Approve</button>" in _page(world).text
+    assert any("its press's approval did not count" in line for line in world.lines)

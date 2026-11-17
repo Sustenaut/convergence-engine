@@ -290,7 +290,10 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
             body += f"<p>Plan sha256 <code>{escape(ask.plan_sha256)}</code></p>"
         body += _plan_table(ask)
         actor = person(request)
-        if ask.state == "awaiting" and actor:
+        pressed = ask.state == "awaiting" and ask.approve_on_plan
+        if pressed:  # a person's Fulfil: approved by them as soon as its plan is stored, never by a button
+            body += f"<p>{escape(ask.approve_on_plan)} pressed Fulfil: it is approved by them now its plan is walked.</p>"
+        elif ask.state == "awaiting" and actor:
             hidden = (f'<input type="hidden" name="token" value="{token("decide", actor, ask.id, ask.plan_sha256)}">'
                       f'<input type="hidden" name="plan" value="{escape(ask.plan_sha256)}">')
             body += (f'<form method="post" action="/approvals/{escape(ask.id)}">{hidden}'
@@ -306,7 +309,7 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
                 ["Need", "State"], [[f"<code>{escape(n['need'])}</code>", _state(n["state"])] for n in ask.needs],
                 "No need.")
         page = _page(f"Request {ask.id}", body + '<p><a href="/approvals">Back to the approvals</a></p>')
-        if ask.state in ("planning", "running") or (ask.state == "approved" and ask.kind == "fulfil"):
+        if ask.state in ("planning", "running") or pressed or (ask.state == "approved" and ask.kind == "fulfil"):
             page.headers["Refresh"] = "5"  # no script: the browser reloads it
         return page
 
@@ -322,7 +325,10 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
             raise HTTPException(403, "the form has expired, is someone else's, or shows another plan: open it again")
         if form.get("decision") not in ("approve", "decline"):
             raise HTTPException(400, "approve or decline")
-        refused = approvals.decide(ask.id, actor, form["decision"] == "approve")
+        wanted = "approved" if form["decision"] == "approve" else "declined"
+        refused = approvals.decide(ask.id, actor, wanted == "approved")
+        if refused and any(c["state"] == wanted and c["by"] == actor for c in ask.changes):
+            refused = ""  # their own decision already counted (a second press, or their Fulfil's own)
         if refused:
             return _page(f"Request {ask.id}", f"<p class=missing>Not done: {escape(refused)}</p>", status=409)
         return RedirectResponse(f"/approvals/{ask.id}", status_code=303)
