@@ -155,7 +155,7 @@ def theme_served(world: World) -> None:
     from convergence import page
     pinned = json.loads((page.THEME_DIR.parent / "theme.json").read_text())
     assert pinned["repository"] == "Sustenaut/theme" and pinned["version"].startswith("v")
-    for name, sha in pinned["files"].items():
+    for name, sha in ((f["path"], f["sha256"]) for f in pinned["files"]):
         answer = world.client.get(f"/theme/{name}")
         assert answer.status_code == 200 and hashlib.sha256(answer.content).hexdigest() == sha
     assert world.client.get("/theme/fonts/nunito-latin-wght-normal.woff2").headers["content-type"] == "font/woff2"

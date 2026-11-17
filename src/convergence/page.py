@@ -153,7 +153,8 @@ THEME_TYPES = {"css": "text/css; charset=utf-8", "woff2": "font/woff2", "txt": "
 
 def _theme() -> dict[str, bytes]:
     """The vendored theme's files, each checked against theme.json's sha256: one that differs is not served."""
-    pinned = json.loads((THEME_DIR.parent / "theme.json").read_text(encoding="utf-8"))["files"]
+    listed = json.loads((THEME_DIR.parent / "theme.json").read_text(encoding="utf-8"))["files"]
+    pinned = {f["path"]: f["sha256"] for f in listed}
     files = {name: (THEME_DIR / name).read_bytes() for name in pinned}
     return {name: data for name, data in files.items() if hashlib.sha256(data).hexdigest() == pinned[name]}
 
