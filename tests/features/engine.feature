@@ -22,7 +22,13 @@ Feature: Rounds of read-only walks
     Given the walk of Sustenaut/notifier finds "k8s.namespace:notifier" ready
     When a round runs
     Then Sustenaut/shared-infra was cloned
-    And Sustenaut/notifier was walked with "./pubdeploy check --json --journal https://storage.test --zones ../shared-infra/pubkit.json"
+    And Sustenaut/notifier was walked with "./pubdeploy check --json --journal https://storage.test --zones ../shared-infra/pubrules.json"
+
+  Scenario: A zones repository that has not moved to pubrules yet is read from its pubkit.json
+    Given Sustenaut/shared-infra still keeps its zones in pubkit.json
+    And the walk of Sustenaut/notifier finds "k8s.namespace:notifier" ready
+    When a round runs
+    Then Sustenaut/notifier was walked with "./pubdeploy check --json --journal https://storage.test --zones ../shared-infra/pubkit.json"
 
   Scenario: An owner without a zones repository walks without --zones
     Given the zones repositories are '{"Other": "Other/infra", "Sustenaut": "Elsewhere/infra"}'
@@ -41,7 +47,7 @@ Feature: Rounds of read-only walks
     Given a Bitwarden read token
     And the walk of Sustenaut/notifier finds "bitwarden.secret:slack" ready
     When a round runs
-    Then Sustenaut/notifier was walked with "./pubsec run -- ./pubdeploy check --json --journal https://storage.test --zones ../shared-infra/pubkit.json"
+    Then Sustenaut/notifier was walked with "./pubsec run -- ./pubdeploy check --json --journal https://storage.test --zones ../shared-infra/pubrules.json"
     And Sustenaut/notifier's walk had BWS_ACCESS_TOKEN
 
   Scenario: A clone that fails keeps the last good walk, and says why

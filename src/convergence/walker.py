@@ -1,6 +1,6 @@
 """One service's walk: its own ./pubdeploy, in its clone, read-only.
 
-    ./pubdeploy check --json --journal URL [--zones ../ZONES/pubkit.json]
+    ./pubdeploy check --json --journal URL [--zones ../ZONES/pubrules.json]
     ./pubsec run -- ./pubdeploy check ...          with a Bitwarden read token
 
 `check` is a walk that cannot fulfil; a request's plan is `check --unit U`. An approved Fulfil (the page's button) runs
@@ -61,19 +61,32 @@ class Credentials:
     google: tuple[tuple[str, str], ...] = ()
 
 
+# Until 2026-12-31: repositories move from pubkit.json to pubrules.json one at a time
+# (the pubkit -> pubrules rename), so a checkout's file is whichever it has. Once the
+# sweep is done, drop pubkit.json here and the PUBKIT_ names in environment().
+CONFIGS = ("pubrules.json", "pubkit.json")
+
+
+def config_name(checkout: Path) -> str:
+    """The checkout's pubrules.json, or its pubkit.json while it has not moved."""
+    return next((name for name in CONFIGS if (checkout / name).is_file()), CONFIGS[0])
+
+
 def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None,
-         unit: str | None = None) -> list[str]:
+         unit: str | None = None, zones_file: str = CONFIGS[0]) -> list[str]:
     command = (["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", fulfil_unit] if fulfil_unit
                else ["./pubdeploy", "check", *(["--unit", unit] if unit else [])]) + ["--json", "--journal", journal]
     if zones:
-        command += ["--zones", f"../{zones}/pubkit.json"]
+        command += ["--zones", f"../{zones}/{zones_file}"]
     return ["./pubsec", "run", "--", *command] if through_pubsec else command
 
 
 def environment(base: Mapping[str, str], credentials: Credentials, by: str, cache: Path) -> dict[str, str]:
     env = {k: base[k] for k in PASSED if k in base}
-    env.update({"PUBKIT_PLANE": "1", "PUBKIT_WALK_BY": by, "GH_TOKEN": credentials.github_token,
-                "PUBKIT_STORAGE_TOKEN": credentials.storage_token, "XDG_CACHE_HOME": str(cache),
+    for prefix in ("PUBRULES", "PUBKIT"):  # a service's pubdeploy reads one or the other (CONFIGS)
+        env.update({f"{prefix}_PLANE": "1", f"{prefix}_WALK_BY": by,
+                    f"{prefix}_STORAGE_TOKEN": credentials.storage_token})
+    env.update({"GH_TOKEN": credentials.github_token, "XDG_CACHE_HOME": str(cache),
                 "UV_CACHE_DIR": str(cache / "uv"), "GIT_TERMINAL_PROMPT": "0"})
     if credentials.bitwarden_token:
         env["BWS_ACCESS_TOKEN"] = credentials.bitwarden_token
@@ -102,7 +115,8 @@ def walk(repository: str, clone: Path, zones: str | None, journal: str, credenti
         return result
     through_pubsec = bool(credentials.bitwarden_token) and (clone / "pubsec").is_file()
     started = clock()
-    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit, unit), clone,
+    zones_file = config_name(clone.parent / zones) if zones else CONFIGS[0]
+    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit, unit, zones_file), clone,
                       environment(base, credentials, by, cache), timeout)
     result.seconds = round(clock() - started, 3)
     # A fulfil's plan and what it did, as pubdeploy prints them (names and states, no value).
