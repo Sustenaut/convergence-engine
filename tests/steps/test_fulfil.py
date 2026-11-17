@@ -162,7 +162,7 @@ def plan_then_fulfil(world: World, tmp_path: Path) -> None:
     checks = [a for a in world.runner.walked("--unit") if "--fulfil" not in a]
     assert len(checks) == 2 and checks[0][:4] == ["./pubdeploy", "check", "--unit", "notifier"]
     (env,) = world.walk_envs(fulfil=True)
-    assert env["GH_TOKEN"] == "ghs_write" and env["PUBKIT_WALK_BY"] == WHO
+    assert env["GH_TOKEN"] == "ghs_write" and env["PUBRULES_WALK_BY"] == WHO
     assert env["PUBSEC_WRITE_TOKEN_FILE"] == str(tmp_path / "write-token")
     (argv,) = world.runner.walked("--fulfil")
     assert argv[:6] == ["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", "notifier"]

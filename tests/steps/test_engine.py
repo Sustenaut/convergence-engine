@@ -67,18 +67,13 @@ def world(tmp_path: Path) -> World:
 @given(parsers.parse('the state repository {slug} gives the role deploy to "{names}"'))
 def state_gives(world: World, slug: str, names: str) -> None:
     repos = {n.strip(): {"board": True, "deploy": True} for n in names.split(",")}
-    repos["pubkit"] = {"board": True}
+    repos["pubrules"] = {"board": True}
     world.runner.states[slug] = json.dumps({"owner": "Sustenaut", "repos": repos})
 
 
 @given(parsers.parse("the zones repositories are '{text}'"))
 def zones_are(world: World, text: str) -> None:
     world.env["CONVERGENCE_ZONES"] = text
-
-
-@given(parsers.parse("{slug} still keeps its zones in pubkit.json"))
-def zones_in_pubkit_json(world: World, slug: str) -> None:
-    world.runner.files[slug] = {"pubkit.json": "{}"}
 
 
 @given(parsers.re(r'the walk of (?P<slug>\S+) finds "(?P<a>[^"]+)" (?P<sa>\w+)( and "(?P<b>[^"]+)" (?P<sb>\w+))?$'))
@@ -204,8 +199,8 @@ def was_cloned(world: World, slug: str) -> None:
 def walked_with(world: World, slug: str, command: str) -> None:
     assert world.walk_of(slug) == command.split(), world.walk_of(slug)
     env = world.env_of(slug)
-    assert "SECRET" not in env and env["PUBKIT_PLANE"] == "1" and env["GH_TOKEN"] == "ghs_installation"
-    assert env["PUBKIT_STORAGE_TOKEN"] == "storage-token" and env["PUBKIT_WALK_BY"] == "schedule"
+    assert "SECRET" not in env and env["PUBRULES_PLANE"] == "1" and env["GH_TOKEN"] == "ghs_installation"
+    assert env["PUBRULES_STORAGE_TOKEN"] == "storage-token" and env["PUBRULES_WALK_BY"] == "schedule"
     assert env["PUBRULES_PLANE"] == "1" and env["PUBRULES_STORAGE_TOKEN"] == "storage-token"
     assert env["PUBRULES_WALK_BY"] == "schedule"
     assert all("ghs_" not in a and "token" not in a for argv, _, _ in world.runner.calls for a in argv)

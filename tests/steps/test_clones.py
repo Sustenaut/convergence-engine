@@ -34,13 +34,13 @@ def ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return {"tmp": tmp_path, "monkeypatch": monkeypatch}
 
 
-@given(parsers.parse('a repository {slug} on a local git server, with pubkit.json "{text}"'))
+@given(parsers.parse('a repository {slug} on a local git server, with pubrules.json "{text}"'))
 def local_server(ctx: dict, slug: str, text: str) -> None:
     server = ctx["tmp"] / "server"
     source = ctx["tmp"] / "source"
     source.mkdir()
     git("init", "-q", "-b", "main", cwd=source)
-    (source / "pubkit.json").write_text(text)
+    (source / "pubrules.json").write_text(text)
     git("add", ".", cwd=source)
     git("commit", "-qm", "one", cwd=source)
     (server / slug).parent.mkdir(parents=True)
@@ -59,14 +59,14 @@ def refresh(ctx: dict, slug: str) -> None:
         ctx["error"] = str(e)
 
 
-@then(parsers.parse('the clone\'s pubkit.json is "{text}"'))
+@then(parsers.parse('the clone\'s pubrules.json is "{text}"'))
 def clone_has(ctx: dict, text: str) -> None:
-    assert (ctx["clone"] / "pubkit.json").read_text() == text
+    assert (ctx["clone"] / "pubrules.json").read_text() == text
 
 
-@when(parsers.parse('the repository\'s pubkit.json becomes "{text}" and a stray file is left in the clone'))
+@when(parsers.parse('the repository\'s pubrules.json becomes "{text}" and a stray file is left in the clone'))
 def change(ctx: dict, text: str) -> None:
-    (ctx["source"] / "pubkit.json").write_text(text)
+    (ctx["source"] / "pubrules.json").write_text(text)
     git("commit", "-qam", "two", cwd=ctx["source"])
     git("push", "-q", str(next((ctx["tmp"] / "server").rglob("*.git"))), "main",
         cwd=ctx["source"])

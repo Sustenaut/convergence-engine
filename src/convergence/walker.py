@@ -8,9 +8,9 @@
 write token's file (PUBSEC_WRITE_TOKEN_FILE) and the installation token that may
 write reach a walk. The subprocess's environment is built
 here from nothing: PATH, HOME, the cluster's address (so kubectl uses the
-pod's ServiceAccount: pubdeploy's plane channel, PUBKIT_PLANE), the
+pod's ServiceAccount: pubdeploy's plane channel, PUBRULES_PLANE), the
 installation token as GH_TOKEN, the storage token, who walked
-(PUBKIT_WALK_BY), and the Bitwarden read token when there is one. The engine's
+(PUBRULES_WALK_BY), and the Bitwarden read token when there is one. The engine's
 own environment is never passed on, and no value is on the command line.
 
 pubdeploy prints the deploy-journal/2 document (a list of them for a block of
@@ -61,31 +61,23 @@ class Credentials:
     google: tuple[tuple[str, str], ...] = ()
 
 
-# Until 2026-12-31: repositories move from pubkit.json to pubrules.json one at a time
-# (the pubkit -> pubrules rename), so a checkout's file is whichever it has. Once the
-# sweep is done, drop pubkit.json here and the PUBKIT_ names in environment().
-CONFIGS = ("pubrules.json", "pubkit.json")
-
-
-def config_name(checkout: Path) -> str:
-    """The checkout's pubrules.json, or its pubkit.json while it has not moved."""
-    return next((name for name in CONFIGS if (checkout / name).is_file()), CONFIGS[0])
+# Each repository's settings, deploy block and hosting zones among them.
+CONFIG = "pubrules.json"
 
 
 def argv(zones: str | None, journal: str, through_pubsec: bool, fulfil_unit: str | None = None,
-         unit: str | None = None, zones_file: str = CONFIGS[0]) -> list[str]:
+         unit: str | None = None) -> list[str]:
     command = (["./pubdeploy", "walk", "--fulfil", "--yes", "--unit", fulfil_unit] if fulfil_unit
                else ["./pubdeploy", "check", *(["--unit", unit] if unit else [])]) + ["--json", "--journal", journal]
     if zones:
-        command += ["--zones", f"../{zones}/{zones_file}"]
+        command += ["--zones", f"../{zones}/{CONFIG}"]
     return ["./pubsec", "run", "--", *command] if through_pubsec else command
 
 
 def environment(base: Mapping[str, str], credentials: Credentials, by: str, cache: Path) -> dict[str, str]:
     env = {k: base[k] for k in PASSED if k in base}
-    for prefix in ("PUBRULES", "PUBKIT"):  # a service's pubdeploy reads one or the other (CONFIGS)
-        env.update({f"{prefix}_PLANE": "1", f"{prefix}_WALK_BY": by,
-                    f"{prefix}_STORAGE_TOKEN": credentials.storage_token})
+    env.update({"PUBRULES_PLANE": "1", "PUBRULES_WALK_BY": by,
+                "PUBRULES_STORAGE_TOKEN": credentials.storage_token})
     env.update({"GH_TOKEN": credentials.github_token, "XDG_CACHE_HOME": str(cache),
                 "UV_CACHE_DIR": str(cache / "uv"), "GIT_TERMINAL_PROMPT": "0"})
     if credentials.bitwarden_token:
@@ -115,8 +107,7 @@ def walk(repository: str, clone: Path, zones: str | None, journal: str, credenti
         return result
     through_pubsec = bool(credentials.bitwarden_token) and (clone / "pubsec").is_file()
     started = clock()
-    zones_file = config_name(clone.parent / zones) if zones else CONFIGS[0]
-    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit, unit, zones_file), clone,
+    ran: Ran = runner(argv(zones, journal, through_pubsec, fulfil_unit, unit), clone,
                       environment(base, credentials, by, cache), timeout)
     result.seconds = round(clock() - started, 3)
     # A fulfil's plan and what it did, as pubdeploy prints them (names and states, no value).

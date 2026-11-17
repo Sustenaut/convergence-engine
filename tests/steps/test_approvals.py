@@ -428,7 +428,7 @@ def awaiting_with_plan(world: World, state: str, found: str) -> None:
 def plan_walk_ran(world: World) -> None:
     ((argv, _, env),) = [c for c in world.runner.calls if c[0][0] != "git" and "--unit" in c[0]]
     assert argv[:4] == ["./pubdeploy", "check", "--unit", "notifier"]
-    assert env["PUBKIT_WALK_BY"] == REPOSITORY and env["GH_TOKEN"] == "ghs_read"
+    assert env["PUBRULES_WALK_BY"] == REPOSITORY and env["GH_TOKEN"] == "ghs_read"
 
 
 @then(parsers.re(r'the request ends "(?P<state>[^"]+)" with (?P<found>.*)'))
@@ -459,12 +459,12 @@ def request_is(world: World, state: str) -> None:
     assert world.ask.state == state
 
 
-@then("the Fulfil walk ran with PUBKIT_WALK_BY the person")
+@then("the Fulfil walk ran with PUBRULES_WALK_BY the person")
 def fulfil_as_person(world: World) -> None:
     (env,) = world.walk_envs(fulfil=True)
-    assert env["PUBKIT_WALK_BY"] == WHO and env["GH_TOKEN"] == "ghs_write"
+    assert env["PUBRULES_WALK_BY"] == WHO and env["GH_TOKEN"] == "ghs_write"
     checks = [env for argv, _, env in world.runner.calls if "check" in argv and "--unit" in argv]
-    assert [e["PUBKIT_WALK_BY"] for e in checks] == [REPOSITORY, WHO]
+    assert [e["PUBRULES_WALK_BY"] for e in checks] == [REPOSITORY, WHO]
 
 
 @then("every event names the request, its plan's sha256, and no value")

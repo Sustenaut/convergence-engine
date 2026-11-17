@@ -136,7 +136,7 @@ def the_pod_module_builds_nothing_without_its_settings(monkeypatch: pytest.Monke
 @given(parsers.parse('a checkout of {name} whose deploy block has the namespace "{ns}" and a unit in "{unit}"'))
 def checkout(ctx: dict, name: str, ns: str, unit: str, tmp_path: Path) -> None:
     (tmp_path / "co" / name).mkdir(parents=True)
-    (tmp_path / "co" / name / "pubkit.json").write_text(json.dumps(
+    (tmp_path / "co" / name / "pubrules.json").write_text(json.dumps(
         {"deploy": {"namespace": ns, "units": {"eu": {"namespace": unit}, "odd": "x"}}}))
     ctx["checkouts"] = tmp_path / "co"
 

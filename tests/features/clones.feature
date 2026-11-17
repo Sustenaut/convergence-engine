@@ -5,12 +5,12 @@ Feature: Clones and the walk's subprocess
   subprocess gets an environment built from nothing.
 
   Scenario: A clone is made once, then follows the default branch
-    Given a repository Sustenaut/svc on a local git server, with pubkit.json "one"
+    Given a repository Sustenaut/svc on a local git server, with pubrules.json "one"
     When the engine refreshes its clone of Sustenaut/svc
-    Then the clone's pubkit.json is "one"
-    When the repository's pubkit.json becomes "two" and a stray file is left in the clone
+    Then the clone's pubrules.json is "one"
+    When the repository's pubrules.json becomes "two" and a stray file is left in the clone
     And the engine refreshes its clone of Sustenaut/svc
-    Then the clone's pubkit.json is "two"
+    Then the clone's pubrules.json is "two"
     And the stray file is gone
     And no file in the clone holds the token
 
