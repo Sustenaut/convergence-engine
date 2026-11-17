@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -344,9 +345,26 @@ def plan_escaped(world: World) -> None:
     assert f"Plan sha256 <code>{world.ask.plan_sha256}</code>" in text
 
 
-@then("the page shows no buttons")
-def no_buttons(world: World) -> None:
-    assert world.answer.status_code == 200 and "<button" not in world.answer.text
+@then(parsers.parse('Approve and Decline are shown disabled, saying "{why}"'))
+def decide_disabled(world: World, why: str) -> None:
+    text = world.answer.text
+    assert world.answer.status_code == 200 and 'name="decision"' not in text
+    assert re.search(r'<button type="button" disabled title="[^"]*" aria-describedby="why-approve">Approve</button>', text)
+    assert re.search(r'class=quiet disabled title="[^"]*" aria-describedby="why-approve">Decline</button>', text)
+    assert why in unescape(re.search(r'id="why-approve">([^<]*)<', text).group(1))
+    _release(world)
+
+
+@when("the plan has been walked and the person declined it")
+def walked_and_declined(world: World) -> None:
+    _release(world)
+    assert world.approvals.decide(world.ask.id, WHO, False) == ""
+    _page(world)
+
+
+@then("the page reloads itself")
+def page_reloads(world: World) -> None:
+    assert world.answer.headers["Refresh"] == "5"
 
 
 @when("the person approves it")
@@ -675,9 +693,6 @@ def press_awaiting(world: World, unit: str) -> None:
     world.ask = ask
 
 
-@then("the page says the person pressed Fulfil and reloads itself")
-def says_pressed(world: World) -> None:
-    assert f"{WHO} pressed Fulfil" in world.answer.text and world.answer.headers["Refresh"] == "5"
 
 
 @when("the person approves it twice with the same form")

@@ -36,11 +36,12 @@ import json
 import secrets
 import time
 from html import escape
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .approvals import Approvals, Ask
 from .callers import Callers, Refused
@@ -48,14 +49,30 @@ from .engine import Engine, Service
 from .journals import Journals
 
 STATES = ("ready", "missing", "drift", "blocked", "unknown")
-STYLE = ("body{font:15px/1.5 system-ui;margin:2rem auto;max-width:76rem;padding:0 1rem;color-scheme:light dark}"
-         "table{border-collapse:collapse;width:100%;margin-bottom:1.5rem}th,td{padding:.25rem .5rem;"
-         "border-bottom:1px solid #8884;text-align:left;vertical-align:top}td.n,th.n{text-align:right}"
-         ".ready{color:#2a7a2a}.missing,.drift,.blocked{font-weight:600;color:#b03a2e}.unknown{color:#8a6d00}"
-         "code{font-size:13px}h2{margin-top:2rem}")
+# The look is Sustenaut/theme's (vendored in theme/, theme.json pins its tag and hashes):
+# its tokens, fonts and element defaults, and these few rules made from its tokens.
+STYLE = ("body{margin:0;padding:2rem 1rem}main{margin:0 auto;max-width:76rem}"
+         "h1,h2,h3{font-family:var(--font-display);line-height:1.25}h2{margin-top:2.5rem}"
+         "table{border-collapse:collapse;width:100%;margin-bottom:1.5rem;background:var(--color-surface);"
+         "border-radius:var(--radius-panel);overflow:hidden}th,td{padding:.4rem .6rem;"
+         "border-bottom:1px solid var(--color-rule);text-align:left;vertical-align:top}"
+         "th{color:var(--color-muted);font-weight:600}"
+         ".ready{color:var(--color-primary)}.missing,.drift,.blocked{font-weight:600;color:var(--color-bad)}"
+         ".unknown{color:var(--color-warn)}"
+         ".actions{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin:1rem 0;padding:.75rem 1rem;"
+         "background:var(--color-surface);border:1px solid var(--color-rule);border-radius:var(--radius-panel)}"
+         ".actions form{display:inline}"
+         "button{font:inherit;font-weight:600;min-height:44px;padding:.5rem 1rem;border-radius:var(--radius-control);"
+         "border:1px solid var(--color-primary);background:var(--color-primary);color:var(--color-on-primary);"
+         "cursor:pointer}button.quiet{background:transparent;color:var(--color-ink);border-color:var(--color-rule-strong)}"
+         "button:disabled{background:var(--color-sunken);color:var(--color-muted);border-color:var(--color-rule);"
+         "cursor:not-allowed}.why{color:var(--color-muted);font-size:.9em}"
+         ".callout{padding:.75rem 1rem;border-radius:var(--radius-control);background:var(--color-warn-soft)}"
+         "pre{background:var(--color-sunken);padding:.75rem;border-radius:var(--radius-control);overflow:auto}")
+THEME = ("fonts.css", "tokens.css", "base.css")
 HEADERS = {"Cache-Control": "private, no-store",
-           "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"}
-AUTO = ("The engine fulfils this once a person approves its plan (the button below). From a laptop: "
+           "Content-Security-Policy": "default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'"}
+AUTO = ("The engine fulfils this once a person approves its plan (the unit's Fulfil button). From a laptop: "
         "<code>./with-secrets ./pubdeploy walk --fulfil --unit {unit}</code>")
 ROLE = "convergence"
 BODY_BYTES = 16384
@@ -64,7 +81,9 @@ BODY_BYTES = 16384
 def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
     return HTMLResponse(f'<!doctype html><html lang="en"><meta charset="utf-8">'
                         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-                        f"<title>{escape(title)}</title><style>{STYLE}</style><h1>{escape(title)}</h1>{body}</html>",
+                        f"<title>{escape(title)}</title>"
+                        + "".join(f'<link rel="stylesheet" href="/theme/{name}">' for name in THEME)
+                        + f"<style>{STYLE}</style><main><h1>{escape(title)}</h1>{body}</main></html>",
                         status_code=status, headers=HEADERS)
 
 
@@ -122,6 +141,24 @@ def _fulfillable(document: dict[str, Any]) -> bool:
     return any(n["grade"] == "auto" and n["state"] in ("missing", "drift") for n in document["needs"])
 
 
+def _unusable(label: str, why: str, slot: str) -> str:
+    """A button that cannot be used now: shown disabled, and why, on hover and to a screen reader."""
+    return (f'<button type="button" disabled title="{escape(why)}" aria-describedby="why-{escape(slot)}">'
+            f'{escape(label)}</button> <span class=why id="why-{escape(slot)}">{escape(why)}</span>')
+
+
+THEME_DIR = Path(__file__).parent / "theme"
+THEME_TYPES = {"css": "text/css; charset=utf-8", "woff2": "font/woff2", "txt": "text/plain; charset=utf-8"}
+
+
+def _theme() -> dict[str, bytes]:
+    """The vendored theme's files, each checked against theme.json's sha256: one that differs is not served."""
+    listed = json.loads((THEME_DIR.parent / "theme.json").read_text(encoding="utf-8"))["files"]
+    pinned = {f["path"]: f["sha256"] for f in listed}
+    files = {name: (THEME_DIR / name).read_bytes() for name in pinned}
+    return {name: data for name, data in files.items() if hashlib.sha256(data).hexdigest() == pinned[name]}
+
+
 def _age(seconds: float) -> str:
     seconds = max(0, int(seconds))
     return f"{seconds // 3600} h {seconds % 3600 // 60} min" if seconds >= 3600 else f"{seconds // 60} min"
@@ -162,10 +199,29 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         return hmac.new(key, "\n".join(parts).encode(), hashlib.sha256).hexdigest()
 
     def person(request: Request) -> str:
-        """The signed-in person holding the role, or ""."""
+        """The signed-in person holding the role, or "". oauth2-proxy adds one
+        X-Forwarded-Groups line per group, so every line counts, each maybe a list."""
         actor = request.headers.get("x-forwarded-email", "").strip()
-        groups = {g.strip() for g in request.headers.get("x-forwarded-groups", "").split(",")}
+        groups = {g.strip() for line in request.headers.getlist("x-forwarded-groups") for g in line.split(",")}
         return actor if actor and ROLE in groups else ""
+
+    def why_not_fulfil(actor: str, repository: str, document: dict[str, Any]) -> str:
+        """Why the unit's Fulfil cannot be pressed now, or ""."""
+        unit = document["service"]["unit"]
+        if not actor:
+            return "Sign in with the role convergence to fulfil"
+        if engine.fulfil_token is None:
+            return "This engine has no installation token that may write: it fulfils nothing"
+        if all(n["state"] == "ready" for n in document["needs"]):
+            return "Nothing to fulfil: every need is ready"
+        if not _fulfillable(document):
+            return "Nothing the engine can fulfil: what is left is a person's step or a proposal"
+        if any(a.kind == "fulfil" and a.repository == repository and a.unit == unit and not a.ended
+               for a in approvals.asks.values()):
+            return "A request to fulfil this unit is already open: see Approvals"
+        if engine.walking(repository).locked():
+            return "A walk of this service is running: reload when it ends"
+        return ""
 
     def actor_of(request: Request) -> str:
         actor = person(request)
@@ -178,21 +234,34 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
     async def form_of(request: Request) -> dict[str, str]:
         return {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8", "replace")).items()}
 
-    def button(request: Request, repository: str, unit: str) -> str:
-        actor = person(request)
-        if not actor or engine.fulfil_token is None:
-            return ""
+    def button(request: Request, repository: str, document: dict[str, Any], slot: str) -> str:
+        """The unit's Fulfil, always shown: pressed, its plan is walked and you approve it."""
+        actor, unit = person(request), document["service"]["unit"]
+        label = f"Fulfil {unit}"
+        why = why_not_fulfil(actor, repository, document)
+        if why:
+            return _unusable(label, why, slot)
         return (f'<form method="post" action="/services/{escape(repository)}/fulfil">'
                 f'<input type="hidden" name="unit" value="{escape(unit)}">'
                 f'<input type="hidden" name="token" value="{token("fulfil", actor, repository, unit)}">'
-                f'<button>Fulfil the auto needs of {escape(unit)}</button> as {escape(actor)}: '
-                f"the plan is walked first, and you approve it</form>")
+                f'<button title="Walk the plan, then approve it as {escape(actor)}">{escape(label)}</button></form>'
+                f" <span class=why>as {escape(actor)}: the plan is walked first, and you approve it</span>")
 
     def service(owner: str, name: str) -> Service:
         found = engine.status.services.get(f"{owner}/{name}")
         if found is None:
             raise HTTPException(404, "no such service")
         return found
+
+    theme = _theme()
+
+    @app.get("/theme/{path:path}")
+    def themed(path: str) -> Response:
+        """The theme's files, as theme.json pins them; nothing else is served from here."""
+        if path not in theme:
+            raise HTTPException(404, "no such file")
+        return Response(theme[path], media_type=THEME_TYPES[path.rsplit(".", 1)[-1]],
+                        headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
@@ -218,11 +287,14 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         s = service(owner, name)
         body = f"<p class=missing>The latest try, {escape(s.tried_at)}, failed: {escape(s.failure)}</p>" \
             if s.failure else ""
-        for document in s.last.documents if s.last else []:
+        documents = s.last.documents if s.last else []
+        if documents:
+            body += '<div class=actions aria-label="Fulfil">' + "<br>".join(
+                button(request, s.repository, d, f"top-{i}") for i, d in enumerate(documents)) + "</div>"
+        for i, document in enumerate(documents):
             unit = document["service"]["unit"]
-            body += f"<h2>Unit {escape(unit)}</h2>" + _needs(document)
-            if _fulfillable(document):
-                body += button(request, s.repository, unit)
+            body += (f"<h2>Unit {escape(unit)}</h2><div class=actions>{button(request, s.repository, document, f'unit-{i}')}"
+                     f"</div>" + _needs(document))
             try:
                 walks = journals.history(s.repository, unit)
                 rows = [[f'<a href="/services/{escape(s.repository)}/walks/{escape(w["hash"])}">{escape(w["time"])}</a>',
@@ -255,7 +327,9 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         unit = form.get("unit", "")
         if not hmac.compare_digest(form.get("token", ""), token("fulfil", actor, s.repository, unit)):
             raise HTTPException(403, "the form has expired, or is someone else's: open the page again")
-        started = approvals.press(s.repository, unit, actor)
+        document = next((d for d in (s.last.documents if s.last else []) if d["service"]["unit"] == unit), None)
+        why = why_not_fulfil(actor, s.repository, document) if document else ""
+        started = why or approvals.press(s.repository, unit, actor)
         if isinstance(started, str):
             return _page(f"{s.repository}, unit {unit}", f"<p class=missing>Not started: {escape(started)}</p>",
                          status=409)
@@ -291,14 +365,22 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         body += _plan_table(ask)
         actor = person(request)
         pressed = ask.state == "awaiting" and ask.approve_on_plan
-        if pressed:  # a person's Fulfil: approved by them as soon as its plan is stored, never by a button
-            body += f"<p>{escape(ask.approve_on_plan)} pressed Fulfil: it is approved by them now its plan is walked.</p>"
-        elif ask.state == "awaiting" and actor:
+        why = ("" if ask.state == "awaiting" and actor and not pressed else
+               f"This is {ask.approve_on_plan}'s Fulfil: it is approved by them now its plan is walked" if pressed else
+               "Sign in with the role convergence to decide" if ask.state == "awaiting" else
+               "The plan is being walked: it can be decided once it is shown" if ask.state == "planning" else
+               f"This request is {ask.state}: it no longer awaits a decision")
+        if why:  # a person's own Fulfil is approved by them as soon as its plan is stored, never by a button
+            body += ('<div class=actions><span role=group aria-label="Decide">'
+                     + _unusable("Approve", why, "approve") + "</span> <button type=button class=quiet disabled "
+                     f'title="{escape(why)}" aria-describedby="why-approve">Decline</button></div>')
+        else:
             hidden = (f'<input type="hidden" name="token" value="{token("decide", actor, ask.id, ask.plan_sha256)}">'
                       f'<input type="hidden" name="plan" value="{escape(ask.plan_sha256)}">')
-            body += (f'<form method="post" action="/approvals/{escape(ask.id)}">{hidden}'
+            body += (f'<div class=actions><form method="post" action="/approvals/{escape(ask.id)}">{hidden}'
                      f'<button name="decision" value="approve">Approve</button> '
-                     f'<button name="decision" value="decline">Decline</button> as {escape(actor)}</form>')
+                     f'<button name="decision" value="decline" class=quiet>Decline</button></form>'
+                     f" <span class=why>as {escape(actor)}</span></div>")
         if ask.error:
             body += f"<p class=missing>It did not finish: {escape(ask.error)}</p>"
         body += "<h2>Changes</h2>" + _table(["State", "When", "By"], [

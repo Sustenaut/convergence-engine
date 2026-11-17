@@ -55,9 +55,41 @@ Feature: A person's Fulfil
     When the person presses Fulfil for the unit "notifier" of "Sustenaut/notifier"
     Then the press is refused, saying "fulfils nothing"
 
-  Scenario: The page offers a fulfil to the signed in person with the role alone
+  Scenario: The page offers a fulfil to the signed in person with the role, at the top and on the unit
     Given the engine has walked Sustenaut/notifier
-    Then the page offers a fulfil to the signed in person with the role alone
+    When the person opens the service page
+    Then Fulfil notifier can be pressed, at the top and on the unit
+
+  Scenario: The role counts in any of oauth2-proxy's group lines
+    Given the engine has walked Sustenaut/notifier
+    When the person, with the role on the second of two group lines opens the service page
+    Then Fulfil notifier can be pressed, at the top and on the unit
+
+  Scenario Outline: Fulfil is shown disabled, saying why, when it cannot be pressed
+    Given the engine has walked Sustenaut/notifier
+    And <situation>
+    When <viewer> opens the service page
+    Then Fulfil notifier is shown disabled, at the top and on the unit, saying "<why>"
+
+    Examples:
+      | situation                                   | viewer                      | why                                                  |
+      | nothing more                                | no one signed in            | Sign in with the role convergence to fulfil          |
+      | nothing more                                | the person without the role | Sign in with the role convergence to fulfil          |
+      | every need is ready                         | the person                  | Nothing to fulfil: every need is ready               |
+      | the need left is a proposal                 | the person                  | Nothing the engine can fulfil                        |
+      | a request to fulfil the unit is open        | the person                  | A request to fulfil this unit is already open        |
+      | a walk of Sustenaut/notifier is running now | the person                  | A walk of this service is running                    |
+
+  Scenario: An engine without a write token shows Fulfil disabled
+    Given the engine without a write token has walked Sustenaut/notifier
+    When the person opens the service page
+    Then Fulfil notifier is shown disabled, at the top and on the unit, saying "no installation token that may write"
+
+  Scenario: A Fulfil posted while a request for the unit is open is refused, saying why
+    Given the engine has walked Sustenaut/notifier
+    And a request to fulfil the unit is open
+    When the person posts the Fulfil form they had
+    Then the page answers 409 saying "already open"
 
   Scenario: A fulfil from the page runs and its request page says how it went
     Given the engine has walked Sustenaut/notifier

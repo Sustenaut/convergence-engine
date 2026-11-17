@@ -288,13 +288,13 @@ Feature: Requests a person approves first
   Scenario: The page shows no buttons to a person without the role
     Given a GitHub run asked for a gate with the plan "x"
     When a person without the role opens the request's page
-    Then the page shows no buttons
+    Then Approve and Decline are shown disabled, saying "Sign in with the role convergence to decide"
 
   Scenario: A press's request shows no Approve while its own approval is on its way
     Given the person's Fulfil of the unit "notifier" has its plan and awaits its own approval
     When the person opens the request's page
-    Then the page shows no buttons
-    And the page says the person pressed Fulfil and reloads itself
+    Then Approve and Decline are shown disabled, saying "This is someone@example.org's Fulfil"
+    And the page reloads itself
 
   Scenario: A second Approve by the same person is their decision, not an error
     Given a GitHub run asked for a gate with the plan "x"
@@ -310,3 +310,13 @@ Feature: Requests a person approves first
   Scenario: A press whose own approval the journal refuses awaits a decision like any request
     When the person presses Fulfil and the journal refuses its approval
     Then the request awaits a decision with the buttons, and the log says why
+
+  Scenario Outline: Approve and Decline are shown disabled, saying why, once a request no longer awaits
+    Given a GitHub run asked for a fulfil of the unit "notifier"
+    When <moment>
+    Then Approve and Decline are shown disabled, saying "<why>"
+
+    Examples:
+      | moment                                                  | why                                         |
+      | the person opens the request's page while its plan is walked | The plan is being walked                |
+      | the plan has been walked and the person declined it     | This request is declined: it no longer awaits a decision |
