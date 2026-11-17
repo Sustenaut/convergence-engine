@@ -289,3 +289,24 @@ Feature: Requests a person approves first
     Given a GitHub run asked for a gate with the plan "x"
     When a person without the role opens the request's page
     Then the page shows no buttons
+
+  Scenario: A press's request shows no Approve while its own approval is on its way
+    Given the person's Fulfil of the unit "notifier" has its plan and awaits its own approval
+    When the person opens the request's page
+    Then the page shows no buttons
+    And the page says the person pressed Fulfil and reloads itself
+
+  Scenario: A second Approve by the same person is their decision, not an error
+    Given a GitHub run asked for a gate with the plan "x"
+    When the person approves it twice with the same form
+    Then the second answer sends them to the request's page
+    And the journal holds 2 events, "awaiting", "approved"
+
+  Scenario: An Approve after another person's decision says what happened
+    Given a GitHub run asked for a gate with the plan "x"
+    When another person declines it, and then the person approves it with the form they had
+    Then the page answers 409 saying "that request is declined (other@example.org"
+
+  Scenario: A press whose own approval the journal refuses awaits a decision like any request
+    When the person presses Fulfil and the journal refuses its approval
+    Then the request awaits a decision with the buttons, and the log says why

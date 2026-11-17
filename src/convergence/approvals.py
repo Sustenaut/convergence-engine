@@ -331,7 +331,10 @@ class Approvals:
             self._end(ask, "failed", "engine", error=f"the journal refused its plan ({e})")
             return
         if ask.approve_on_plan:
-            self.decide(ask.id, ask.approve_on_plan, True)
+            refused = self.decide(ask.id, ask.approve_on_plan, True)
+            if refused:  # it awaits a decision as any request does: the buttons show again
+                ask.approve_on_plan = ""
+                self.log(f"convergence: request {ask.id}: its press's approval did not count ({refused})")
 
     def _run(self, ask: Ask) -> None:
         lock = self.engine.walking(ask.repository)
@@ -373,8 +376,11 @@ class Approvals:
         self.expire_due()
         with self._lock:
             ask = self.asks.get(id_)
-            if ask is None or ask.state != "awaiting":
-                return "that request is not awaiting a decision"
+            if ask is None:
+                return "there is no such request"
+            if ask.state != "awaiting":
+                last = ask.changes[-1]
+                return f"that request is {ask.state} ({last['by']}, {last['at']}), not awaiting a decision"
             try:
                 self._move(ask, "approved" if approve else "declined", actor,
                            approver=actor if approve else "")
