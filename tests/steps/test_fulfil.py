@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+from html import unescape
 import hmac
 import json
 import re
@@ -13,6 +14,8 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from convergence.approvals import Ask
+from convergence.callers import Requester
 from convergence.tokens import READ, Tokens
 
 from .fakes import journal
@@ -194,11 +197,73 @@ def form_of(world: World, unit: str | None = None) -> dict[str, str]:
                                             hashlib.sha256).hexdigest()}
 
 
-@then("the page offers a fulfil to the signed in person with the role alone")
-def offers_fulfil(world: World) -> None:
-    assert "Fulfil the auto needs of notifier" in world.client.get(f"/services/{REPOSITORY}", headers=person()).text
-    assert "Fulfil the" not in world.client.get(f"/services/{REPOSITORY}").text
-    assert "Fulfil the" not in world.client.get(f"/services/{REPOSITORY}", headers=person(role=False)).text
+VIEWERS = {"the person": person(), "no one signed in": {}, "the person without the role": person(role=False),
+           "the person, with the role on the second of two group lines": None}
+
+
+@when(parsers.re(r"(?P<viewer>the person|no one signed in|the person without the role|"
+                 r"the person, with the role on the second of two group lines) opens the service page"))
+def opens_service(world: World, viewer: str) -> None:
+    headers = VIEWERS[viewer]
+    if headers is None:  # oauth2-proxy adds one line per group
+        headers = [("X-Forwarded-Email", WHO), ("X-Forwarded-Groups", "people"), ("X-Forwarded-Groups", "convergence")]
+    world.answer = world.client.get(f"/services/{REPOSITORY}", headers=headers)
+
+
+@then("Fulfil notifier can be pressed, at the top and on the unit")
+def fulfil_pressable(world: World) -> None:
+    text = world.answer.text
+    assert text.count(f'<form method="post" action="/services/{REPOSITORY}/fulfil">') == 2
+    assert text.count(">Fulfil notifier</button>") == 2 and " disabled" not in text
+    assert text.index("<div class=actions") < text.index("<h2>Unit notifier</h2>")
+
+
+@then(parsers.parse('Fulfil notifier is shown disabled, at the top and on the unit, saying "{why}"'))
+def fulfil_disabled(world: World, why: str) -> None:
+    text = world.answer.text
+    assert "/fulfil\">" not in text and 'name="token"' not in text
+    for slot in ("top-0", "unit-0"):
+        assert re.search(rf'<button type="button" disabled title="[^"]*{re.escape(why)}[^"]*" '
+                         rf'aria-describedby="why-{slot}">Fulfil notifier</button>', unescape(text))
+        assert why in unescape(re.search(rf'id="why-{slot}">([^<]*)<', text).group(1))
+    if world.engine.walking(REPOSITORY).locked():
+        world.engine.walking(REPOSITORY).release()
+
+
+@given("nothing more")
+def nothing_more() -> None:
+    pass
+
+
+@given("every need is ready")
+def every_ready(world: World) -> None:
+    world.runner.walk_prints(REPOSITORY, journal(states={"k8s.secret:s": "ready"}))
+    world.engine.round()
+
+
+@given("the need left is a proposal")
+def need_is_proposal(world: World) -> None:
+    world.runner.walk_prints(REPOSITORY, journal(states={"github.secret:S": "missing"},
+                                                 grades={"github.secret:S": "propose"}), code=1)
+    world.engine.round()
+
+
+@given("a request to fulfil the unit is open")
+def request_open(world: World) -> None:
+    world.form = form_of(world)
+    ask = Ask("open", "fulfil", Requester("person", WHO, actor=WHO), REPOSITORY, "notifier", world.now,
+              world.now + 3600)
+    world.approvals._take(ask, "awaiting", plan=[], plan_sha256="0" * 64)  # noqa: SLF001 - held open
+
+
+@given("a walk of Sustenaut/notifier is running now")
+def walk_running_now(world: World) -> None:
+    world.engine.walking(REPOSITORY).acquire()
+
+
+@when("the person posts the Fulfil form they had")
+def posts_form_had(world: World) -> None:
+    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=world.form, headers=person())
 
 
 @when("the person posts the Fulfil form and the walk makes it ready")
@@ -225,7 +290,7 @@ def request_page_done(world: World) -> None:
     assert "<span class=ready>done</span>" in page.text and "Refresh" not in page.headers
     assert "<td><span class=ready>approved</span><td>" in page.text and WHO in page.text
     assert "k8s.secret:s: made" in page.text and "<code>k8s.secret:s</code>" in page.text
-    assert "Approve</button>" not in page.text
+    assert 'name="decision"' not in page.text and "it no longer awaits a decision" in page.text
 
 
 @then("the old Fulfil link leads to the request's page")

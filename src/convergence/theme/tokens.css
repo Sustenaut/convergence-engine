@@ -1,0 +1,51 @@
+/* Sustenaut's design tokens as plain custom properties, for a page
+   without Tailwind: var(--color-surface), var(--font-display) and the rest.
+   Written by tools/build.js from tokens.json: edit that, then run npm run build. */
+
+:root {
+  --color-ground: #f3efe2; /* cream */
+  --color-surface: #fffdf6;
+  --color-sunken: #ede6d4;
+  --color-ink: #17110c; /* soil */
+  --color-muted: #5d4d3f;
+  --color-rule: #ddd4bf;
+  --color-rule-strong: #c9bea6;
+  --color-link: #1f6b35; /* canopy */
+  --color-primary: #1f6b35;
+  --color-on-primary: #fffdf6;
+  --color-accent: #5bc236; /* sprout */
+  --color-accent-soft: #ddf0d2;
+  --color-warn: #8a5a00;
+  --color-warn-soft: #f6e6c2; /* seed, softened */
+  --color-bad: #9b2c1f;
+  --color-bad-soft: #f6d9d3;
+  --color-soil: #17110c;
+  --color-seed: #e8a317; /* amber, for favourite stars */
+  --font-sans: "Nunito Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Nunito", "Nunito Sans", system-ui, sans-serif;
+  --radius-control: 10px;
+  --radius-panel: 14px;
+  --shadow-panel: 0 8px 28px rgba(23, 17, 12, 0.14);
+}
+
+/* Dark: the same token names, so nothing needs a dark: variant. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ground: #17110c;
+    --color-surface: #221911;
+    --color-sunken: #2b2017;
+    --color-ink: #f3efe2;
+    --color-muted: #b9ab95;
+    --color-rule: #3a2a1e; /* loam */
+    --color-rule-strong: #54402f;
+    --color-link: #a6de58; /* leaf */
+    --color-primary: #5bc236;
+    --color-on-primary: #17110c;
+    --color-accent-soft: #24361a;
+    --color-warn: #e8a317; /* seed */
+    --color-warn-soft: #33260f;
+    --color-bad: #f08a7a;
+    --color-bad-soft: #3a1c17;
+    --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}

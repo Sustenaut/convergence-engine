@@ -65,6 +65,7 @@ Behind oauth2-proxy and the team sign-in, for people with the role `convergence`
 | `/approvals/ID` | one request: its plan and the plan's sha256, where it came from (with a link to the GitHub run), Approve and Decline while it awaits, each state change with who and when, and a Fulfil's output and end states; it reloads itself while it works |
 | `POST /approvals/ID` | a person's Approve or Decline |
 | `/fulfils/ID` | 4b's links: redirects to `/approvals/ID` |
+| `/theme/…` | the vendored theme's files, as `theme.json` pins them |
 | `/healthz` | open; 200 while rounds end in time |
 
 Open without the sign-in, for callers with a bearer token (oauth2-proxy's
@@ -76,7 +77,22 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 | `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
 The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
-string from a walk or a caller escaped.
+string from a walk or a caller escaped. They wear Sustenaut's theme
+([Sustenaut/theme](https://github.com/Sustenaut/theme)): its `fonts.css`, `tokens.css`,
+`base.css` and fonts are vendored in `src/convergence/theme/`, `src/convergence/theme.json`
+pins the tag and each file's sha256, and the engine serves them itself at `/theme/…`
+(no CDN: the CSP allows only the site's own styles and fonts). A file that differs from
+its pin is not served. To move to a new tag, copy the same files from it and update
+`theme.json`.
+
+**Buttons are always shown.** Each unit's Fulfil is at the top of its service page and
+again on the unit; Approve and Decline are on every request page. One that cannot be used
+now is disabled, and says why, on hover and beside it (for a screen reader too): not
+signed in with the role `convergence`, nothing to fulfil (every need ready), nothing the
+engine can fulfil (a person's step or a proposal left), a request for that unit already
+open, a walk of the service running, an engine without a write token; or for a request,
+its plan still being walked, the person's own Fulfil, or a state that no longer awaits a
+decision.
 
 **Requests.** A request is something a caller wants done that a person approves first
 (`approvals.py`). A `fulfil` runs `./pubdeploy walk --fulfil --yes --unit U` once

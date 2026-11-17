@@ -89,3 +89,12 @@ Feature: A page per service
       | health    | status |
       | healthy   | 200    |
       | unhealthy | 503    |
+
+  Scenario: The pages wear Sustenaut's theme, served by the engine itself
+    When I open "/"
+    Then the page links the theme's fonts, tokens and base styles
+    And every theme file is served as theme.json pins it
+    And a file that is not the theme's is 404
+
+  Scenario: A theme file that differs from its pin is not served
+    Then a theme file whose bytes differ from theme.json is not served

@@ -132,9 +132,50 @@ def walk_links(world: World, count: int) -> None:
 @then("the page is private and runs no script")
 def private(world: World) -> None:
     assert world.answer.headers["Cache-Control"] == "private, no-store"
-    assert world.answer.headers["Content-Security-Policy"].startswith("default-src 'none'")
+    policy = world.answer.headers["Content-Security-Policy"]
+    assert policy.startswith("default-src 'none'") and "script-src" not in policy
+    assert "<script" not in world.answer.text
 
 
 @then(parsers.parse("the answer is {status:d}"))
 def answer_is(world: World, status: int) -> None:
     assert world.answer.status_code == status, world.answer.text
+
+
+@then("the page links the theme's fonts, tokens and base styles")
+def links_theme(world: World) -> None:
+    for name in ("fonts.css", "tokens.css", "base.css"):
+        assert f'<link rel="stylesheet" href="/theme/{name}">' in world.answer.text
+    assert "style-src 'self' 'unsafe-inline'; font-src 'self'" in world.answer.headers["Content-Security-Policy"]
+
+
+@then("every theme file is served as theme.json pins it")
+def theme_served(world: World) -> None:
+    import hashlib
+    from convergence import page
+    pinned = json.loads((page.THEME_DIR.parent / "theme.json").read_text())
+    assert pinned["repository"] == "Sustenaut/theme" and pinned["version"].startswith("v")
+    for name, sha in pinned["files"].items():
+        answer = world.client.get(f"/theme/{name}")
+        assert answer.status_code == 200 and hashlib.sha256(answer.content).hexdigest() == sha
+    assert world.client.get("/theme/fonts/nunito-latin-wght-normal.woff2").headers["content-type"] == "font/woff2"
+    assert world.client.get("/theme/tokens.css").headers["content-type"].startswith("text/css")
+
+
+@then("a file that is not the theme's is 404")
+def theme_404(world: World) -> None:
+    assert world.client.get("/theme/../theme.json").status_code == 404
+    assert world.client.get("/theme/nope.css").status_code == 404
+
+
+@then("a theme file whose bytes differ from theme.json is not served")
+def theme_differs(world: World, tmp_path: Path, monkeypatch) -> None:
+    import shutil
+    from convergence import page
+    copy = tmp_path / "convergence"
+    shutil.copytree(page.THEME_DIR, copy / "theme")
+    shutil.copy(page.THEME_DIR.parent / "theme.json", copy / "theme.json")
+    (copy / "theme" / "base.css").write_text("body{}")
+    monkeypatch.setattr(page, "THEME_DIR", copy / "theme")
+    served = page._theme()  # noqa: SLF001
+    assert "base.css" not in served and "tokens.css" in served

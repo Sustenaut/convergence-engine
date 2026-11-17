@@ -1,0 +1,23 @@
+/* Optional element defaults, in plain CSS, so they work with or without
+   Tailwind: the page's colours, text font and links from the tokens
+   (theme.css or tokens.css first). In the base layer, so a site's own rules
+   and Tailwind's utilities win over them. */
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.625;
+  }
+  a {
+    color: var(--color-link);
+  }
+  code {
+    font-size: 0.9em;
+  }
+}

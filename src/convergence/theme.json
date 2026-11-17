@@ -1,0 +1,16 @@
+{
+  "comment": "Sustenaut/theme, vendored: the files of its tag, each checked by its sha256 (tests/features/page.feature). To move: copy the same files from the new tag, then update version and hashes.",
+  "repository": "Sustenaut/theme",
+  "version": "v0.1.0",
+  "files": {
+    "base.css": "a265d5417a85500f97d5154d39346a58ef3f9a2a992f83ea69398a8d3f8d5f19",
+    "fonts/OFL-nunito-sans.txt": "6632e6c45fcc18cc03909a0a53d84e9775185e06203ff80d6367cf93959b91a8",
+    "fonts/OFL-nunito.txt": "40991bfa02ac620aae16dc527f3c47765a25e43f270d4c301ee6ab663a8d9015",
+    "fonts/nunito-latin-ext-wght-normal.woff2": "2c8d792869818ecb253a46bc3c63c7013df7aac2f69291c3c85e5cdc94160960",
+    "fonts/nunito-latin-wght-normal.woff2": "ba344451eab25b217a165363b1982048a5e5830a0daf36577973955a04cac793",
+    "fonts/nunito-sans-latin-ext-wght-normal.woff2": "c648ee5bfda70d44b9fb628f4114d1cc4f984d050cbb4881052237ede3638a2e",
+    "fonts/nunito-sans-latin-wght-normal.woff2": "29e3890496844a9ea81975c52771c587c872b4eb317026422d1995b88d21b57d",
+    "fonts.css": "bba5c501ae9ea8e487fcccd21314852497880298f91accf37b022fd46d4e38df",
+    "tokens.css": "2655928ffd599e9db408d5ac1c1a975ad9f82a9d162e174939fa99bcd0801626"
+  }
+}
