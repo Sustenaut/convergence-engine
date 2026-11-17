@@ -1,7 +1,8 @@
 # What a person's Fulfil may change in the cluster (step 4b), as the ServiceAccount
 # convergence/app: a Secret made from Bitwarden (pubsec's k8s.secret), the restart of
-# the Deployments that read it, and a Job from a CronJob (k8s.cronjob, service.health).
-# Nothing else: no delete, no exec, no RBAC (so no escalate or bind), no namespaces
+# the Deployments that read it, a Job from a CronJob (k8s.cronjob, service.health), and
+# a one-off Job (pubdeploy's k8s.job-once), which a rerun of a failed one deletes first.
+# Nothing else: no other delete, no exec, no RBAC (so no escalate or bind), no namespaces
 # (k8s.namespace stays an admin's step), and no Secret read beyond secret-readers.yaml.
 # Rounds use the same identity, but run `pubdeploy check`, which writes nothing.
 # Applied by the deploy walk over the admin channel (pubkit.json's k8s.manifests).
@@ -18,7 +19,8 @@ rules:
     verbs: [patch]
   - apiGroups: [batch]
     resources: [jobs]
-    verbs: [create]
+    # delete: k8s.job-once's rerun: if-failed deletes that one failed Job before making it again.
+    verbs: [create, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
