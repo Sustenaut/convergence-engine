@@ -197,7 +197,7 @@ def _plan_table(ask: Ask) -> str:
 
 def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers: Callers | None = None,
                site: str = "https://convergence.sustenaut.eu", key: bytes | None = None,
-               clock=time.time) -> FastAPI:
+               clock=time.time, runs: Any = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     key = key or secrets.token_bytes(32)  # a new pod's forms are made afresh
 
@@ -430,6 +430,90 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
 
     def refusal(e: Refused) -> JSONResponse:
         return JSONResponse({"refused": e.reason}, status_code=e.status, headers=HEADERS)
+
+    # --- Live runs (runs.py): JSON for the run page's poll and buttons, and a remote executor
+
+    def run_of(id_: str) -> Any:
+        found = runs.get(id_) if runs is not None else None
+        if found is None:
+            raise HTTPException(404, "no such run")
+        return found
+
+    async def json_of(request: Request) -> Any:
+        try:
+            return json.loads(await request.body() or b"{}")
+        except ValueError:
+            raise HTTPException(400, "the body is JSON") from None
+
+    def answered(call: Any, ok: int = 200) -> JSONResponse:
+        from .runs import Refusal  # noqa: PLC0415
+        try:
+            out = call()
+        except Refusal as e:
+            return JSONResponse({"refused": e.why}, status_code=e.status, headers=HEADERS)
+        return JSONResponse(out, status_code=ok, headers=HEADERS)
+
+    @app.get("/runs/{id_}")
+    def run_state(id_: str, since: int = 0) -> JSONResponse:
+        run = run_of(id_)
+        headers = {**HEADERS, "Cache-Control": "private, max-age=3600"} if run.ended else HEADERS
+        return JSONResponse(runs.view(run, since), headers=headers)
+
+    @app.post("/runs")
+    async def start_run(request: Request) -> JSONResponse:
+        actor = actor_of(request)
+        body = await json_of(request)
+        if runs is None:
+            raise HTTPException(503, "this engine has no live runs")
+        if not isinstance(body, dict) or body.get("mode") not in ("check", "fulfil"):
+            raise HTTPException(400, "a run is {repository, unit, mode: check|fulfil, modes?}")
+        try:
+            taken = approvals.person_run(actor, str(body.get("repository") or ""), str(body.get("unit") or ""),
+                                         body["mode"], body.get("modes") or {})
+        except Refused as e:
+            return refusal(e)
+        return JSONResponse(runs.view(runs.runs[taken.id]), status_code=201,
+                            headers={**HEADERS, "Location": f"/runs/{taken.id}"})
+
+    @app.post("/runs/{id_}/approve")
+    async def approve_run(id_: str, request: Request) -> JSONResponse:
+        actor, run = actor_of(request), run_of(id_)
+        body = await json_of(request)
+        if not isinstance(body, dict) or body.get("plan_key") != run.plan_key:
+            return JSONResponse({"refused": "the plan changed: look again"}, status_code=409, headers=HEADERS)
+        refused = approvals.decide(run.request_id, actor, True)
+        if refused:
+            return JSONResponse({"refused": refused}, status_code=409, headers=HEADERS)
+        return JSONResponse(runs.view(run), headers=HEADERS)
+
+    @app.post("/runs/{id_}/stop")
+    def stop_run(id_: str, request: Request):
+        actor, run = actor_of(request), run_of(id_)
+        if run.ended:
+            return Response(status_code=204, headers=HEADERS)
+        return answered(lambda: (runs.stop(run, actor), runs.view(run))[1])
+
+    @app.post("/runs/{id_}/needs/{name}/cancel")
+    async def cancel_need(id_: str, name: str, request: Request) -> JSONResponse:
+        actor, run = actor_of(request), run_of(id_)
+        body = await json_of(request)
+        return answered(lambda: (runs.cancel(run, name, body, actor), runs.view(run))[1])
+
+    @app.post("/runs/{id_}/needs/{name}/mode")
+    async def need_mode(id_: str, name: str, request: Request) -> JSONResponse:
+        actor, run = actor_of(request), run_of(id_)
+        body = await json_of(request)
+        mode = body.get("mode") if isinstance(body, dict) else None
+        return answered(lambda: {"plan_key": runs.set_mode(run, name, mode, actor)})
+
+    @app.post("/runs/{id_}/events")
+    async def run_event(id_: str, request: Request) -> JSONResponse:
+        run = run_of(id_)
+        scheme, _, given = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not run.token or not hmac.compare_digest(given.strip(), run.token):
+            return JSONResponse({"refused": "not-this-runs-executor"}, status_code=403, headers=HEADERS)
+        body = await json_of(request)
+        return answered(lambda: runs.event(run, body))
 
     @app.post("/requests")
     async def ask(request: Request) -> JSONResponse:

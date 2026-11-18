@@ -1,0 +1,679 @@
+"""Steps for live runs: the engine, its requests and pages as world.py makes them, with
+`pubdeploy machine` faked by the runner and each need's walk by a fake process."""
+
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from pytest_bdd import given, parsers, scenarios, then, when
+
+from convergence.approvals import Ledger
+from convergence.clones import Ran
+from convergence.executor import Executor
+from convergence.journals import Journals
+from convergence.page import create_app
+from convergence.runs import HEAD, Runs
+
+from .fakes import Storage, journal
+from .world import REPOSITORY, SITE, WHO, World, person
+
+scenarios("runs.feature")
+
+WARNING = "it migrates the database"
+
+
+class Proc:
+    """A need's walk: what it prints once it ends, and how it ends."""
+
+    def __init__(self, spawn: Spawn, need: str, fulfil: bool, outcome):
+        self.spawn, self.need, self.fulfil, self.outcome = spawn, need, fulfil, outcome
+        self.terminated = False
+
+    def printed(self, state: str, detail: str = "", need: str | None = None):
+        document = journal(states={need or self.need: state})
+        if detail:
+            document["needs"][0]["details"] = [detail]
+        return 0, json.dumps(document), ""
+
+    def poll(self, timeout: float):
+        if self.terminated:
+            return -15, "", "terminated"
+        kind, *rest = self.outcome
+        if kind == "gate":
+            return self.printed("ready") if self.spawn.gates[self.need].wait(timeout) else None
+        if kind == "barrier":
+            try:
+                self.spawn.barrier.wait(5)
+            except threading.BrokenBarrierError:
+                return 1, "", "alone"
+            return self.printed("ready")
+        if kind == "hang":
+            time.sleep(timeout)
+            return None
+        if kind == "garbage":
+            return 2, "", "pubdeploy: no\n"
+        if kind == "other":
+            return self.printed("ready", need="k8s.secret:other")
+        return self.printed(kind, *rest)
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+
+class Spawn:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.outcomes: dict[tuple[str, bool], tuple] = {}
+        self.states: dict[str, str] = {}
+        self.gates: dict[str, threading.Event] = {}
+        self.barrier = threading.Barrier(2)
+
+    def __call__(self, argv: list[str], cwd: Path, env: dict[str, str]) -> Proc:
+        self.calls.append(argv)
+        need, fulfil = argv[argv.index("--need") + 1], "--fulfil" in argv
+        assert "--budget-seconds" in argv
+        default = (self.states.get(need, "ready"),) if not fulfil else ("ready",)
+        return Proc(self, need, fulfil, self.outcomes.get((need, fulfil), default))
+
+
+def machine(needs: dict[str, dict]) -> dict:
+    return {"id": "notifier", "initial": "running", "meta": {"parallel": 4},
+            "states": {"running": {"type": "parallel", "states": {
+                name: {"initial": "waiting", "meta": meta, "states": {s: {} for s in (
+                    "waiting", "checking", "found", "fulfilling", "ready", "failed", "blocked", "stopped")}}
+                for name, meta in needs.items()}}}}
+
+
+class Live:
+    def __init__(self, world: World) -> None:
+        self.world, self.spawn = world, Spawn()
+        self.needs: dict[str, dict] = {}
+        self.run = None
+        self.answer = None
+        self.first_key = ""
+
+    def runs_for(self, storage: Storage) -> Runs:
+        w = self.world
+        return Runs(w.approvals, Ledger(storage, head=HEAD, name="run.json"),
+                    lambda runs: Executor(runs, spawn=self.spawn, lock_seconds=0.3, slice_=0.01),
+                    image="ghcr.io/example/engine:1", poll_ms=2000, log=w.lines.append, clock=lambda: w.now)
+
+    def compile(self) -> None:
+        self.world.runner.machines[REPOSITORY] = Ran(0, json.dumps(machine(self.needs)), "")
+
+
+@pytest.fixture
+def live(tmp_path) -> Live:
+    return Live(World(tmp_path))
+
+
+def _bind(live: Live, runs: Runs | None) -> None:
+    w = live.world
+    live.runs = runs
+    w.client = TestClient(create_app(w.engine, Journals(w.storage), w.approvals, w.callers, site=SITE,
+                                     key=b"k" * 32, clock=lambda: w.now, runs=runs))
+
+
+@given(parsers.parse("the live needs {found}"))
+def live_needs(live: Live, found: str) -> None:
+    w = live.world
+    parts = re.findall(r'"([^"]+)" (\w+)(?: graded (\w+))?(?: stop (\w+))?(?: after "([^"]+)")?', found)
+    states = {n: s for n, s, *_ in parts}
+    w.runner.walk_prints(REPOSITORY, journal(states=states, grades={n: g for n, _, g, _, _ in parts if g}), code=1)
+    w.engine.round()
+    for name, state, grade, stop, after in parts:
+        live.needs[name] = {"mode": "fulfil", "grade": grade or "auto", "type": name.split(":")[0],
+                            "stop": stop or "signal", "after": [after] if after else [], "seconds": 30,
+                            **({"stop_warning": WARNING} if stop == "continue" else {})}
+        live.spawn.states[name] = {"missing": "missing", "drift": "drift"}.get(state, state)
+    live.compile()
+    _bind(live, live.runs_for(w.storage))
+
+
+@given("each need's fulfil waits until the other's has started")
+def barrier(live: Live) -> None:
+    for name in live.needs:
+        live.spawn.outcomes[(name, True)] = ("barrier",)
+
+
+@given(parsers.parse('the fulfil of "{need}" waits until it is let go'))
+def gated(live: Live, need: str) -> None:
+    live.spawn.gates[need] = threading.Event()
+    live.spawn.outcomes[(need, True)] = ("gate",)
+
+
+@given("every fulfil waits until it is let go")
+def all_gated(live: Live) -> None:
+    for name in live.needs:
+        gated(live, name)
+
+
+@given(parsers.parse('the fulfil of "{need}" leaves it missing'))
+def leaves_missing(live: Live, need: str) -> None:
+    live.spawn.outcomes[(need, True)] = ("missing",)
+
+
+@given(parsers.parse('the check of "{need}" finds it ready, saying "{detail}"'))
+def ready_saying(live: Live, need: str, detail: str) -> None:
+    live.spawn.outcomes[(need, False)] = ("ready", detail)
+
+
+@given(parsers.parse('the check of "{need}" prints no journal'))
+def no_journal(live: Live, need: str) -> None:
+    live.spawn.outcomes[(need, False)] = ("garbage",)
+
+
+@given(parsers.parse('the check of "{need}" names another need'))
+def other_need(live: Live, need: str) -> None:
+    live.spawn.outcomes[(need, False)] = ("other",)
+
+
+@given(parsers.parse('the check of "{need}" finds it unknown'))
+def unknown(live: Live, need: str) -> None:
+    live.spawn.outcomes[(need, False)] = ("unknown",)
+
+
+@given(parsers.parse('the fulfil of "{need}" runs past its budget'))
+def past_budget(live: Live, need: str) -> None:
+    live.needs[need]["seconds"] = 0.05
+    live.compile()
+    live.spawn.outcomes[(need, True)] = ("hang",)
+    live.runs.executor.grace = 0.0
+
+
+@given(parsers.parse('the walk of "{need}" cannot be made'))
+def cannot_make(live: Live, need: str, monkeypatch) -> None:
+    def broken(*a, **k):
+        raise RuntimeError("no clone")
+    monkeypatch.setattr(live.world.engine, "need_command", broken)
+
+
+@when("a walk of Sustenaut/notifier starts and keeps running")
+def walk_starts(live: Live) -> None:
+    live.world.engine.walking(REPOSITORY).acquire()
+
+
+@given("a walk of Sustenaut/notifier keeps running")
+def walk_running(live: Live) -> None:
+    live.world.engine.walking(REPOSITORY).acquire()
+    live.world.approvals.lock_seconds = 0.2
+
+
+@given("pubdeploy compiles no machine")
+def no_machine(live: Live) -> None:
+    live.world.runner.machines.pop(REPOSITORY)
+
+
+@given("storage refuses every write once the run awaits approval")
+def refuse_later(live: Live) -> None:
+    storage = live.world.storage
+    upload = storage.upload_file
+
+    def refusing(data: bytes, *, name: str) -> dict:
+        if name == "run.json" and b'"to": "awaiting"' in data:
+            storage.refuse_writes = True
+        return upload(data, name=name)
+    storage.upload_file = refusing
+
+
+# --- Asking
+
+def _ask(live: Live, body: dict, token: str | None = None):
+    w = live.world
+    live.answer = w.client.post("/requests", json=body, headers={"Authorization": f"Bearer {token or w.token()}"})
+    if live.answer.status_code == 201 and live.runs is not None:
+        live.run = live.runs.runs[live.answer.json()["id"]]
+    return live.answer
+
+
+@when(parsers.re(r"a GitHub run asks for a live (?P<kind>fulfil|check)(?P<modes>, \"[^\"]+\" to check)?$"))
+def asks_live(live: Live, kind: str, modes: str | None) -> None:
+    body = {"kind": kind, "unit": "notifier", "mode": "live"}
+    if modes:
+        body["modes"] = {re.search(r'"([^"]+)"', modes)[1]: "check"}
+    assert _ask(live, body).status_code == 201, live.answer.text
+    live.world.approvals.wait()
+    live.first_key = live.run.plan_key
+
+
+@when("a GitHub run asks for a live fulfil, which is still planning")
+def asks_planning(live: Live) -> None:
+    lock = live.world.engine.walking(REPOSITORY)
+    lock.acquire()
+    live.world.approvals.lock_seconds = 5
+    assert _ask(live, {"kind": "fulfil", "unit": "notifier", "mode": "live"}).status_code == 201
+    live.release = lock
+
+
+@when("the person approves the run")
+def approves(live: Live) -> None:
+    live.world.approvals.wait()
+    answer = live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": live.run.plan_key},
+                                    headers=person())
+    assert answer.status_code == 200, answer.text
+
+
+@when("the person stops the run")
+def stops(live: Live) -> None:
+    answer = live.world.client.post(f"/runs/{live.run.id}/stop", headers=person())
+    assert answer.status_code == 200, answer.text
+
+
+@when(parsers.parse("the needs {names} are fulfilling"))
+def are_fulfilling(live: Live, names: str) -> None:
+    wanted = re.findall(r'"([^"]+)"', names)
+    for _ in range(500):
+        if all(live.run.needs[n].state == "fulfilling" for n in wanted):
+            return
+        time.sleep(0.01)
+    raise AssertionError({n: live.run.needs[n].state for n in wanted})
+
+
+@when(parsers.parse('the fulfil of "{need}" is let go'))
+def let_go(live: Live, need: str) -> None:
+    live.spawn.gates[need].set()
+
+
+@when(parsers.parse('the person cancels "{need}" typing "{typed}"'))
+def cancels(live: Live, need: str, typed: str) -> None:
+    answer = live.world.client.post(f"/runs/{live.run.id}/needs/{need}/cancel", json={"confirm": typed},
+                                    headers=person())
+    assert answer.status_code == 200, answer.text
+    _settle(live, need)
+
+
+@when(parsers.parse('the person switches "{need}" to "{mode}"'))
+def switches(live: Live, need: str, mode: str) -> None:
+    answer = live.world.client.post(f"/runs/{live.run.id}/needs/{need}/mode", json={"mode": mode}, headers=person())
+    assert answer.status_code == 200, answer.text
+
+
+def _event(live: Live, body, token: str | None = "run"):
+    headers = {"Authorization": f"Bearer {live.run.token if token == 'run' else token}"} if token else {}
+    return live.world.client.post(f"/runs/{live.run.id}/events", json=body, headers=headers)
+
+
+@when(parsers.parse('the run\'s executor posts the event "{need}" from "{frm}" to "{to}"'))
+def posts_event(live: Live, need: str, frm: str, to: str) -> None:
+    live.event_body = {"seq": len(live.run.journal) + 1, "need": need, "from": frm, "to": to, "at": "now"}
+    live.answers = [_event(live, live.event_body)]
+
+
+@when("the run's executor posts the same event again")
+def posts_again(live: Live) -> None:
+    live.answers.append(_event(live, live.event_body))
+
+
+@when("a second GitHub run asks for a live fulfil that awaits approval")
+def second_run(live: Live) -> None:
+    live.walking = live.run
+    w = live.world
+    body = {"kind": "fulfil", "unit": "notifier", "mode": "live"}
+    answer = w.client.post("/requests", json=body, headers={"Authorization": f"Bearer {w.token(run_id='778')}"})
+    assert answer.status_code == 201, answer.text
+    live.awaiting = live.runs.runs[answer.json()["id"]]
+    w.approvals.wait()
+    assert live.awaiting.state == "awaiting"
+
+
+@when("a new pod starts the runs from storage")
+def new_pod(live: Live) -> None:
+    w = live.world
+    w.approvals = w.new_approvals()
+    live.old = live.runs
+    live.runs = live.runs_for(w.storage)
+    w.approvals.start()
+    live.runs.start()
+
+
+@when("the person starts a live fulfil of the unit on the page")
+def page_start(live: Live) -> None:
+    live.answer = live.world.client.post("/runs", json={"repository": REPOSITORY, "unit": "notifier",
+                                                         "mode": "fulfil"}, headers=person())
+    live.world.approvals.wait()
+    live.run = live.runs.runs[live.answer.json()["id"]]
+
+
+@when("the person approves it with its plan key")
+def approves_key(live: Live) -> None:
+    assert live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": live.run.plan_key},
+                                  headers=person()).status_code == 200
+
+
+@when(parsers.re(r"(?P<asker>a GitHub run|the person) asks (?P<how>for a fulfil in mode .*|for a fulfil with modes .*|"
+                 r"for an inline fulfil with modes|for a live fulfil of an engine with no runs|to start a run .*|"
+                 r"for the run .*)"))
+def asks_wrong(live: Live, asker: str, how: str) -> None:
+    w = live.world
+    if how == "for a fulfil in mode \"fast\"":
+        _ask(live, {"kind": "fulfil", "unit": "notifier", "mode": "fast"})
+    elif how == "for a fulfil with modes \"nope\"":
+        _ask(live, {"kind": "fulfil", "unit": "notifier", "mode": "live", "modes": "nope"})
+    elif how == "for an inline fulfil with modes":
+        _ask(live, {"kind": "fulfil", "unit": "notifier", "modes": {"k8s.secret:a": "check"}})
+    elif how == "for a live fulfil of an engine with no runs":
+        w.approvals.runs = None
+        _bind(live, None)
+        _ask(live, {"kind": "fulfil", "unit": "notifier", "mode": "live"})
+    elif how == "to start a run of mode \"fast\"":
+        live.answer = w.client.post("/runs", json={"mode": "fast"}, headers=person())
+    elif how == "to start a run with a body that is not JSON":
+        live.answer = w.client.post("/runs", content=b"{", headers=person())
+    elif how == "to start a run of a unit not there":
+        live.answer = w.client.post("/runs", json={"repository": REPOSITORY, "unit": "x", "mode": "fulfil"},
+                                    headers=person())
+    elif how == "to start a run on an engine with no runs":
+        _bind(live, None)
+        live.answer = w.client.post("/runs", json={"mode": "fulfil"}, headers=person())
+    else:
+        live.answer = w.client.get("/runs/nope", headers=person())
+
+
+@when("25 hours pass")
+def hours_pass(live: Live) -> None:
+    live.world.now += 25 * 3600
+    live.world.client.get("/approvals", headers=person())
+
+
+# --- What came of it
+
+def _settle(live: Live, need: str | None = None) -> None:
+    for _ in range(500):
+        if (need and live.run.needs[need].ended) or (not need and live.run.ended):
+            return
+        time.sleep(0.01)
+
+
+def _ended(live: Live) -> None:
+    live.world.approvals.wait()
+    _settle(live)
+    live.runs.executor.wait()
+
+
+@then(parsers.re(r'the run ends "(?P<state>\w+)"(?: with (?P<found>.*))?$'))
+def run_ends(live: Live, state: str, found: str | None) -> None:
+    _ended(live)
+    assert live.run.state == state, (live.run.state, {n: (x.state, x.result) for n, x in live.run.needs.items()})
+    for name, need_state in re.findall(r'"([^"]+)" (\w+)', found or ""):
+        assert live.run.needs[name].state == need_state, (name, live.run.needs[name])
+
+
+@then(parsers.parse('the run ends "{state}", and nothing was fulfilled'))
+def ends_unfulfilled(live: Live, state: str) -> None:
+    run_ends(live, state, None)
+    assert not [c for c in live.spawn.calls if "--fulfil" in c]
+
+
+@then("nothing was fulfilled")
+def nothing_fulfilled(live: Live) -> None:
+    assert not [c for c in live.spawn.calls if "--fulfil" in c]
+
+
+@then(parsers.re(r'the request ended "(?P<state>\w+)"(?:, saying "(?P<said>[^"]*)")?$'))
+def request_ended(live: Live, state: str, said: str | None) -> None:
+    _ended(live)
+    ask = live.world.approvals.asks[live.run.request_id]
+    assert ask.state == state, (ask.state, ask.error, ask.note)
+    if said:
+        assert said in ask.error + ask.note, (ask.error, ask.note)
+
+
+@then(parsers.parse('the run is "{state}", with the machine pubdeploy compiled for "{mode}" and the needs {names} waiting'))
+def run_is(live: Live, state: str, mode: str, names: str) -> None:
+    run = live.run
+    assert run.state == state and run.machine["states"]["running"]["type"] == "parallel"
+    (call,) = [argv for argv, _, _ in live.world.runner.calls if argv[:2] == ["./pubdeploy", "machine"]]
+    assert call == ["./pubdeploy", "machine", "--unit", "notifier", "--mode", mode]
+    assert {n: x.state for n, x in run.needs.items()} == {n: "waiting" for n in re.findall(r'"([^"]+)"', names)}
+    view = live.world.client.get(f"/runs/{run.id}", headers=person()).json()
+    assert view["request_id"] == run.id and view["image"] == "ghcr.io/example/engine:1"
+    assert view["github_run_url"].endswith("/actions/runs/777") and view["plan_key"] == run.plan_key
+
+
+@then("the request's answer links the run")
+def links_run(live: Live) -> None:
+    answer = live.world.client.get(f"/requests/{live.run.id}",
+                                   headers={"Authorization": f"Bearer {live.world.token()}"}).json()
+    assert answer["mode"] == "live" and answer["run"] == f"{SITE}/runs/{live.run.id}"
+
+
+@then("the run's journal is in storage's head convergence.runs")
+def in_storage(live: Live) -> None:
+    events = live.world.storage.events(HEAD)
+    assert [e["event"]["to"] for e in events] == ["planning", "awaiting"]
+    assert all("token" not in json.dumps(e) for e in events) and live.run.token not in json.dumps(events)
+
+
+@then("each need was walked to check, then to fulfil as the person")
+def walked_twice(live: Live) -> None:
+    for name in live.needs:
+        mine = [c for c in live.spawn.calls if c[c.index("--need") + 1] == name]
+        assert ["--fulfil" in c for c in mine] == [False, True], mine
+
+
+@then(parsers.parse('"{need}" is "{state}" and "{other}" is "{other_state}"'))
+def two_states(live: Live, need: str, state: str, other: str, other_state: str) -> None:
+    are_fulfilling(live, f'"{need}"') if state == "fulfilling" else None
+    assert live.run.needs[need].state == state and live.run.needs[other].state == other_state
+
+
+@then(parsers.parse('"{later}" started after "{earlier}" was ready'))
+def started_after(live: Live, later: str, earlier: str) -> None:
+    seqs = {(e["need"], e["to"]): e["seq"] for e in live.run.journal}
+    assert seqs[(later, "checking")] > seqs[(earlier, "ready")]
+
+
+@then(parsers.parse('"{need}" is "{state}", saying "{said}"'))
+def is_saying(live: Live, need: str, state: str, said: str) -> None:
+    _settle(live, need)
+    assert live.run.needs[need].state == state and said in live.run.needs[need].result
+
+
+@then(parsers.parse('"{need}" is still "{state}", and the journal says "{said}"'))
+def still(live: Live, need: str, state: str, said: str) -> None:
+    assert live.run.needs[need].state == state
+    journal_says(live, said)
+
+
+@then(parsers.parse('the journal says "{said}"'))
+def journal_says(live: Live, said: str) -> None:
+    assert any(said in (e.get("result") or "") for e in live.run.journal), live.run.journal
+
+
+@then(parsers.parse('cancelling "{need}" typing "{typed}" is refused with {status:d}'))
+def cancel_refused(live: Live, need: str, typed: str, status: int) -> None:
+    answer = live.world.client.post(f"/runs/{live.run.id}/needs/{need}/cancel", json={"confirm": typed},
+                                    headers=person())
+    assert answer.status_code == status, answer.text
+
+
+@then("the run's plan key changed, and the request's binds to it")
+def key_changed(live: Live) -> None:
+    assert live.run.plan_key != live.first_key
+    assert live.world.approvals.asks[live.run.request_id].plan_sha256 == live.run.plan_key
+
+
+@then(parsers.parse('switching "{need}" to "{mode}" is refused with {status:d}'))
+def switch_refused(live: Live, need: str, mode: str, status: int) -> None:
+    answer = live.world.client.post(f"/runs/{live.run.id}/needs/{need}/mode", json={"mode": mode}, headers=person())
+    assert answer.status_code == status, answer.text
+
+
+@then(parsers.parse('"{need}" was never fulfilled'))
+def never_fulfilled(live: Live, need: str) -> None:
+    assert not [c for c in live.spawn.calls if "--fulfil" in c and need in c]
+
+
+@then("both answers are the same event, and the journal holds it once")
+def same_event(live: Live) -> None:
+    first, second = (a.json() for a in live.answers)
+    assert all(a.status_code == 200 for a in live.answers) and first == second
+    assert [e["seq"] for e in live.run.journal].count(first["seq"]) == 1
+
+
+@then(parsers.parse('an event from "{frm}" to "{to}" now is refused with {status:d}'))
+def event_refused(live: Live, frm: str, to: str, status: int) -> None:
+    body = {"seq": len(live.run.journal) + 1, "need": "k8s.secret:a", "from": frm, "to": to, "at": "now"}
+    assert _event(live, body).status_code == status
+
+
+@then(parsers.parse("an event without the run's token is refused with {status:d}"))
+def event_no_token(live: Live, status: int) -> None:
+    assert _event(live, live.event_body, token=None).status_code == status
+    assert _event(live, live.event_body, token="another").status_code == status
+
+
+@then(parsers.parse("an event that names no need is refused with {status:d}"))
+def event_no_need(live: Live, status: int) -> None:
+    assert _event(live, {"seq": 1}).status_code == status
+    assert live.world.client.post(f"/runs/{live.run.id}/events", content=b"{",
+                                  headers={"Authorization": f"Bearer {live.run.token}"}).status_code == 400
+
+
+@then(parsers.parse('the walking run ended "{state}" with "{need}" failed, saying "{said}"'))
+def walking_ended(live: Live, state: str, need: str, said: str) -> None:
+    run = live.runs.runs[live.walking.id]
+    assert run.state == state and run.needs[need].state == "failed" and said in run.needs[need].result
+    assert live.world.approvals.asks[run.id].state == "failed"
+    live.spawn.gates[need].set()
+    live.old.executor.wait()
+
+
+@then("the run awaiting approval still awaits it in the new pod")
+def still_awaiting(live: Live) -> None:
+    run = live.runs.runs[live.awaiting.id]
+    assert run.state == "awaiting" and {n.state for n in run.needs.values()} == {"waiting"}
+    assert run.machine == live.awaiting.machine and run.plan_key == live.awaiting.plan_key
+
+
+@then(parsers.parse('the run\'s page answer shows "{shown}" and holds no email or link'))
+def page_public(live: Live, shown: str) -> None:
+    text = live.world.client.get(f"/runs/{live.run.id}", headers=person()).text
+    assert shown in text and "@" not in text and "https://example.org" not in text
+
+
+@then(parsers.parse("the run's answer may be kept an hour, and asks for a poll every {ms:d} ms"))
+def kept(live: Live, ms: int) -> None:
+    answer = live.world.client.get(f"/runs/{live.run.id}?since=2", headers=person())
+    assert answer.headers["Cache-Control"] == "private, max-age=3600" and answer.json()["poll_ms"] == ms
+    assert all(e["seq"] > 2 for e in answer.json()["journal"])
+
+
+@then(parsers.parse("a stop of the ended run answers {status:d}"))
+def stop_ended(live: Live, status: int) -> None:
+    assert live.world.client.post(f"/runs/{live.run.id}/stop", headers=person()).status_code == status
+    assert live.runs.stop(live.run, WHO) == "ended"
+
+
+@then(parsers.parse('"{need}" says "{said}"'))
+def need_says(live: Live, need: str, said: str) -> None:
+    assert said in live.run.needs[need].result, live.run.needs[need].result
+
+
+@then("the answer is 201, a run \"awaiting\" asked by the person")
+def started_by_person(live: Live) -> None:
+    assert live.answer.status_code == 201 and live.answer.headers["location"] == f"/runs/{live.run.id}"
+    assert live.run.state == "awaiting" and live.world.approvals.asks[live.run.id].requester.name == WHO
+
+
+@then(parsers.parse("approving it with another plan key is refused with {status:d}"))
+def wrong_key(live: Live, status: int) -> None:
+    assert live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": "0"},
+                                  headers=person()).status_code == status
+
+
+@then(parsers.parse("approving it again is refused with {status:d}"))
+def approve_again(live: Live, status: int) -> None:
+    assert live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": live.run.plan_key},
+                                  headers=person()).status_code == status
+
+
+@then(parsers.parse("the answer is {status:d}"))
+def answer_is(live: Live, status: int) -> None:
+    assert live.answer.status_code == status, live.answer.text
+
+
+@then(parsers.parse("stopping it is refused with {status:d}"))
+def stop_planning(live: Live, status: int) -> None:
+    assert live.world.client.post(f"/runs/{live.run.id}/stop", headers=person()).status_code == status
+    live.release.release()
+    live.world.approvals.wait()
+
+
+@then(parsers.parse('the run is "{state}", and the log says the journal refused an event'))
+def refused_event(live: Live, state: str) -> None:
+    assert live.run.state == state
+    assert any("the journal refused event" in line for line in live.world.lines)
+
+
+@then(parsers.parse('the journal says "{said}", by the person'))
+def journal_says_by(live: Live, said: str) -> None:
+    assert any(said in (e.get("result") or "") and e["by"] == WHO for e in live.run.journal), live.run.journal
+    view = live.world.client.get(f"/runs/{live.run.id}", headers=person()).text
+    assert WHO not in view
+
+
+@given("pubdeploy compiles a machine that is not JSON")
+def machine_garbage(live: Live) -> None:
+    live.world.runner.machines[REPOSITORY] = Ran(0, "<html>", "")
+
+
+@given("pubdeploy machine cannot run")
+def machine_raises(live: Live, monkeypatch) -> None:
+    def broken(*a, **k):
+        raise OSError("no clone")
+    monkeypatch.setattr(live.world.engine, "machine", broken)
+
+
+def _refuse_move(live: Live, monkeypatch, state: str) -> None:
+    from convergence.approvals import JournalRefused  # noqa: PLC0415
+    approvals = live.world.approvals
+    move = approvals._move  # noqa: SLF001
+
+    def refusing(ask, to, by, **changed):
+        if to == state:
+            raise JournalRefused("RuntimeError")
+        return move(ask, to, by, **changed)
+    monkeypatch.setattr(approvals, "_move", refusing)
+
+
+@given("the journal refuses the request's awaiting")
+def refuse_awaiting(live: Live, monkeypatch) -> None:
+    _refuse_move(live, monkeypatch, "awaiting")
+
+
+@given("the journal refuses the request's start")
+def refuse_start(live: Live, monkeypatch) -> None:
+    _refuse_move(live, monkeypatch, "running")
+
+
+@given("the engine has a Bitwarden read token")
+def bitwarden(live: Live, tmp_path) -> None:
+    import dataclasses  # noqa: PLC0415
+    (tmp_path / "bws").write_text("bws-read")
+    engine = live.world.engine
+    engine.settings = dataclasses.replace(engine.settings, bitwarden_token=tmp_path / "bws")
+
+
+@then("each walk ran through ./pubsec run")
+def through_pubsec(live: Live) -> None:
+    assert live.spawn.calls and all(c[:3] == ["./pubsec", "run", "--"] for c in live.spawn.calls)
+
+
+@then("stopping a need that is not walking does nothing")
+def stop_idle(live: Live) -> None:
+    need = live.run.needs["k8s.secret:a"]
+    live.runs.executor.stop(live.run, need)
+    assert need.state == "waiting"
+
+
+@then(parsers.parse("a stop the request refuses answers {status:d}"))
+def stop_refused(live: Live, status: int, monkeypatch) -> None:
+    monkeypatch.setattr(live.world.approvals, "decide", lambda *a: "that request is not awaiting a decision")
+    assert live.world.client.post(f"/runs/{live.run.id}/stop", headers=person()).status_code == status

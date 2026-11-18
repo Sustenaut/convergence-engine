@@ -51,7 +51,8 @@ HEAD = "convergence.approvals"
 SCHEMA = "convergence-approval/1"
 KINDS = ("fulfil", "gate", "check")
 OPEN = ("planning", "awaiting", "approved", "running")
-ENDED = ("declined", "expired", "done", "failed")
+ENDED = ("declined", "expired", "done", "failed", "stopped")  # stopped: a live run a person stopped
+MODES = ("inline", "live")  # a fulfil's or check's walk: the unit in one go, or need by need (runs.py)
 PLAN_BYTES = 8192
 KEEP_ENDED = 50
 CHANGED = "plan changed since approval"
@@ -77,13 +78,13 @@ class Ledger:
     """The approvals' journal: one storage file per event, the head moved to each in turn,
     so the head's log is every state change, newest first."""
 
-    def __init__(self, storage: Storage):
-        self.storage = storage
+    def __init__(self, storage: Storage, head: str = HEAD, name: str = "approval.json"):
+        self.storage, self.head, self.name = storage, head, name
         self.last: str | None = None  # the event the head points at, which the next one follows
 
     def load(self) -> dict[str, Any] | None:
         try:
-            data, self.last = self.storage.get_head(HEAD)
+            data, self.last = self.storage.get_head(self.head)
         except Exception as e:  # noqa: BLE001 - a new head has no event yet; any other refusal stops the start
             if type(e).__name__ == "NotFound":
                 self.last = None
@@ -94,8 +95,8 @@ class Ledger:
     def append(self, document: dict[str, Any]) -> None:
         try:
             stored = self.storage.upload_file(json.dumps({**document, "previous": self.last}, sort_keys=True).encode(),
-                                              name="approval.json")
-            self.storage.move_head(HEAD, stored["id"], if_match=self.last)
+                                              name=self.name)
+            self.storage.move_head(self.head, stored["id"], if_match=self.last)
         except Exception as e:  # noqa: BLE001 - any refusal: the change is refused with it
             raise JournalRefused(type(e).__name__) from None
         self.last = stored["id"]
@@ -200,6 +201,8 @@ class Ask:
     needs: list[dict[str, str]] = field(default_factory=list)  # each need's state at the end
     documents: list[dict[str, Any]] = field(default_factory=list)  # the Fulfil's journals (in memory)
     approve_on_plan: str = ""  # a person's press: approved by them once planned
+    mode: str = "inline"  # live: walked need by need, as a run (runs.py)
+    modes: dict[str, str] = field(default_factory=dict)  # a live run's modes by need, as asked
 
     @property
     def ended(self) -> bool:
@@ -215,12 +218,30 @@ class Ask:
                 "repository": self.repository, "unit": self.unit, "created_at": self.created_at,
                 "expires_at": self.expires_at, "state": self.state, "plan": self.plan, "text": self.text,
                 "plan_sha256": self.plan_sha256, "changes": self.changes, "approver": self.approver,
-                "error": self.error, "note": self.note, "said": self.said[-60:], "needs": self.needs}
+                "error": self.error, "note": self.note, "said": self.said[-60:], "needs": self.needs,
+                "mode": self.mode, "modes": self.modes}
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> Ask:
         fields = {k: data[k] for k in cls.__dataclass_fields__ if k in data and k != "requester"}
         return cls(requester=Requester.from_record(data.get("requester") or {}), **fields)
+
+
+def live_modes(body: dict[str, Any], runs: Any) -> tuple[str, dict[str, str]]:
+    """A fulfil's or check's mode (inline, the default, or live) and a live run's modes by
+    need; a Refused when either is not one."""
+    mode = body.get("mode", "inline")
+    if mode not in MODES:
+        raise Refused(400, "bad-mode")
+    modes = body.get("modes") or {}
+    if not isinstance(modes, dict) or not all(isinstance(k, str) and v in ("check", "fulfil")
+                                              for k, v in modes.items()):
+        raise Refused(400, "bad-modes")
+    if mode == "live" and runs is None:
+        raise Refused(503, "no-runs")
+    if modes and mode != "live":
+        raise Refused(400, "modes-are-live")
+    return mode, dict(modes)
 
 
 def _iso(moment: float) -> str:
@@ -238,6 +259,7 @@ class Approvals:
         self.lock_seconds = lock_seconds if lock_seconds is not None else \
             engine.settings.walk_seconds + engine.settings.fulfil_seconds
         self.asks: dict[str, Ask] = {}
+        self.runs: Any = None  # runs.Runs, which takes a live request's walks
         self.threads: list[threading.Thread] = []
         self._lock = threading.RLock()
 
@@ -274,9 +296,12 @@ class Approvals:
         self.log(f"convergence: request {ask.id} ({ask.kind} {ask.repository} {ask.unit}): {state} by {by}")
 
     def _end(self, ask: Ask, state: str, by: str, **changed: Any) -> None:
-        """An end the journal refused is still the end: said in the log, kept in memory."""
+        """An end the journal refused is still the end: said in the log, kept in memory. A live
+        request's run ends with it, when it had not."""
         try:
             self._move(ask, state, by, **changed)
+            if ask.mode == "live":
+                self.runs.follow(ask)
         except JournalRefused as e:
             ask.__dict__.update(changed)
             ask.state, ask.error = "failed", ask.error or f"the journal refused this request's end ({e})"
@@ -291,8 +316,8 @@ class Approvals:
         for ask in list(self.asks.values()):
             if ask.state in ("planning", "running"):
                 self._end(ask, "failed", "engine", error=f"the engine restarted while it was {ask.state}")
-            elif ask.state == "approved" and ask.kind == "fulfil":
-                self._thread(self._run, ask)
+            elif ask.state == "approved" and ask.kind == "fulfil" and ask.mode == "inline":
+                self._thread(self._run, ask)  # a live run's restart is runs.py's
 
     # --- Asking
 
@@ -313,15 +338,35 @@ class Approvals:
             return self._take(new, "awaiting", text=text, plan_sha256=plan_sha256(text))
         if requester.kind == "kubernetes":
             raise Refused(403, "gate-only")
+        new.mode, new.modes = live_modes(body, self.runs)
         new.unit = str(body.get("unit") or "")
         if str(body.get("repository") or requester.repository) != requester.repository:
             raise Refused(403, "other-repository")
         reason = self.engine.can_fulfil(new.repository, new.unit)
         if reason and not (new.kind == "check" and reason == "fulfils-nothing"):  # a check writes nothing
             raise Refused(409, reason)
+        return self.begin(new)
+
+    def begin(self, new: Ask) -> Ask:
+        """A fulfil or check taken (its first event journaled), its run made when it is live, and
+        its plan walked in a thread of its own."""
         taken = self._take(new, "planning")
+        if taken.mode == "live":
+            self.runs.create(taken)
         self._thread(self._plan, taken)
         return taken
+
+    def person_run(self, actor: str, repository: str, unit: str, kind: str, modes: Any) -> Ask:
+        """A signed-in approver's live run (POST /runs): their request, which awaits approval as any
+        does (a check needs none); a Refused says why not."""
+        now = self.clock()
+        new = Ask(f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(now))}-{secrets.token_hex(4)}", kind,
+                  Requester("person", actor, actor=actor), repository, unit, now, now + self.seconds)
+        new.mode, new.modes = live_modes({"mode": "live", "modes": modes}, self.runs)
+        reason = self.engine.can_fulfil(repository, unit)
+        if reason and not (kind == "check" and reason == "fulfils-nothing"):
+            raise Refused(409, reason)
+        return self.begin(new)
 
     def press(self, repository: str, unit: str, actor: str) -> Ask | str:
         """A signed-in person's Fulfil from the service page: their request, approved by them."""
@@ -385,6 +430,9 @@ class Approvals:
             lock.release()
         if isinstance(journal, str):
             self._end(ask, "failed", "engine", error=journal)
+            return
+        if ask.mode == "live":  # need by need, as a run: its machine, its plan and its approval
+            self.runs.planned(ask, journal)
             return
         plan = plan_of(journal)
         if ask.kind == "check":  # read-only: each need's state, and nobody is asked anything
@@ -463,7 +511,9 @@ class Approvals:
                            approver=actor if approve else "")
             except JournalRefused:
                 return "the journal refused it: nothing changed"
-        if approve and ask.kind == "fulfil":
+        if ask.mode == "live":
+            self.runs.decided(ask, approve)
+        elif approve and ask.kind == "fulfil":
             self._thread(self._run, ask)
         return ""
 
@@ -474,6 +524,9 @@ class Approvals:
                 self._move(ask, "expired", "expiry")
             except JournalRefused as e:
                 self.log(f"convergence: request {ask.id}: the journal refused its expiry ({e}); tried again later")
+                continue
+            if ask.mode == "live":
+                self.runs.decided(ask, False, "expired")
 
     def loop(self, stop: threading.Event) -> None:  # pragma: no cover - the pod's thread; expire_due() is tested
         while not stop.wait(60):
@@ -496,7 +549,8 @@ class Approvals:
         and an email stays on the page and in the journal."""
         return {"id": ask.id, "kind": ask.kind, "state": ask.state, "repository": ask.repository, "unit": ask.unit,
                 "plan_sha256": ask.plan_sha256, "url": f"{site}/approvals/{ask.id}",
-                "expires_at": _iso(ask.expires_at),  # when an awaiting request expires undecided
+                "expires_at": _iso(ask.expires_at), "mode": ask.mode,
+                **({"run": f"{site}/runs/{ask.id}"} if ask.mode == "live" else {}),  # when an awaiting request expires undecided
                 # The plan's needs by name, state and what the fulfil changes, so a caller can say
                 # what awaits approval; a gate's plan text stays on the page. What may leave the
                 # engine for a public log has no email and no link (public()).

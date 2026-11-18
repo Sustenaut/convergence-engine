@@ -38,6 +38,7 @@ class Runner:
         self.calls: list[tuple[list[str], Path, dict[str, str]]] = []
         self.walks: dict[str, Ran] = {}
         self.fulfils: dict[str, Ran] = {}  # what a --fulfil walk prints, when it differs from a check
+        self.machines: dict[str, Ran] = {}  # what `pubdeploy machine` prints, by repository (step 1's command)
         self.failing: dict[str, str] = {}  # repository -> git's last words
         self.states: dict[str, str] = {}  # state repository -> state.json
 
@@ -57,6 +58,8 @@ class Runner:
                 (dest / "pubsec").write_text("#!/bin/sh\n")
             return Ran(0, "", "")
         slug = f"{cwd.parent.name}/{cwd.name}"
+        if argv[:2] == ["./pubdeploy", "machine"]:
+            return self.machines.get(slug, Ran(2, "", "pubdeploy: no such command: machine\n"))
         if "--fulfil" in argv and slug in self.fulfils:
             return self.fulfils[slug]
         return self.walks.get(slug, Ran(2, "", "pubdeploy: deploy: pubrules.json has no deploy block\n"))
