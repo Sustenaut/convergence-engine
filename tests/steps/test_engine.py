@@ -25,12 +25,11 @@ class World:
         (tmp / "storage-token").write_text("storage-token\n")
         self.env = {"CONVERGENCE_STORAGE_URL": "https://storage.test",
                     "CONVERGENCE_STORAGE_TOKEN_FILE": str(tmp / "storage-token"), "CONVERGENCE_WORK": str(tmp)}
-        self.runner, self.storage, self.lines = Runner(), Storage(), []
+        self.runner, self.storage = Runner(), Storage()
         self.buffer: Storage | None = self.storage
         self.token_error = False
         self.now = 1_000_000.0
         self._engine: Engine | None = None
-        self.started: bool | None = None
 
     def token(self) -> str:
         if self.token_error:
@@ -47,7 +46,7 @@ class World:
 
             self._engine = Engine(settings(self.env), Clones(self.tmp, self.runner, {"PATH": "/bin"}), self.token,
                                   self.buffer, base_env={"PATH": "/bin", "HOME": "/work", "SECRET": "engine-only"},
-                                  walker=walker, log=self.lines.append, clock=lambda: self.now)
+                                  walker=walker, log=print, clock=lambda: self.now)
         return self._engine
 
     def walk_of(self, repository: str) -> list[str]:
@@ -130,25 +129,32 @@ def no_storage_token(world: World) -> None:
 
 
 @given("a round has run")
+def round_ran(world: World) -> None:
+    world.engine.round()
+
+
 @when("a round runs")
-def round_runs(world: World) -> None:
-    world.started = world.engine.round()
+@when("a round is asked for")
+def round_runs(ctx, world: World) -> None:
+    ctx.attempt(world.engine.round)
 
 
 @given("a round is running")
-def round_running(world: World) -> None:
-    world.engine._running.acquire()  # noqa: SLF001 - as a round in another thread holds it
+def round_running(ctx, world: World) -> None:
+    running = world.engine._running  # noqa: SLF001 - as a round in another thread holds it
+    running.acquire()
+    ctx.cleanup(running.release)
 
 
-@when("a round is asked for")
-def round_asked(world: World) -> None:
-    world.started = world.engine.round()
-
-
-@then("it is not started")
-def not_started(world: World) -> None:
-    assert world.started is False
-    world.engine._running.release()  # noqa: SLF001
+@when("a round is asked for from another thread")
+def round_other_thread(ctx, world: World) -> None:
+    def other() -> bool:
+        results: list[bool] = []
+        thread = threading.Thread(target=lambda: results.append(world.engine.round()))
+        thread.start()
+        thread.join()
+        return results[0]
+    ctx.attempt(other)
 
 
 @then(parsers.parse("{slug}'s last walk has {count:d} needs"))
@@ -170,11 +176,6 @@ def no_last(world: World, slug: str) -> None:
 @then(parsers.parse('{slug}\'s failure says "{text}"'))
 def failure_says(world: World, slug: str, text: str) -> None:
     assert text in world.engine.status.services[slug].failure, world.engine.status.services[slug].failure
-
-
-@then(parsers.parse('the log says "{line}"'))
-def log_says(world: World, line: str) -> None:
-    assert line in world.lines, world.lines
 
 
 @then(parsers.parse("storage's buffer holds the facts of {count:d} walks"))
@@ -223,22 +224,9 @@ def health_times(world: World, started: int, ended: str) -> None:
     engine.status.round_ended = None if ended == "none" else world.now - int(ended) * 60
 
 
-@then(parsers.parse("the engine is {health}"))
-def engine_health(world: World, health: str) -> None:
-    assert world.engine.healthy() is (health == "healthy")
-
-
-@then("rounds do not overlap across threads")
-def rounds_do_not_overlap_across_threads(tmp_path: Path) -> None:
-    w = World(tmp_path)
-    w.runner.states["Sustenaut/release-state"] = json.dumps({"owner": "Sustenaut", "repos": {}})
-    w.engine._running.acquire()  # noqa: SLF001
-    results = []
-    t = threading.Thread(target=lambda: results.append(w.engine.round()))
-    t.start()
-    t.join()
-    w.engine._running.release()  # noqa: SLF001
-    assert results == [False]
+@when("the engine's health is asked")
+def health_asked(ctx, world: World) -> None:
+    ctx.attempt(world.engine.healthy)
 
 
 @given(parsers.parse("a round listed {count:d} services"))
@@ -246,11 +234,6 @@ def listed(world: World, count: int) -> None:
     world.engine.status.services = {f"Sustenaut/s{k}": Service(f"Sustenaut/s{k}") for k in range(count)}
 
 
-@when("the work directory is prepared")
-def prepared(world: World) -> None:
-    prepare(world.tmp / "fresh")
-
-
-@then(parsers.parse('it has "{parts}"'))
-def has_parts(world: World, parts: str) -> None:
-    assert all((world.tmp / "fresh" / p.strip()).is_dir() for p in parts.split(","))
+@when(parsers.parse('the work directory "{name}" is prepared'))
+def prepared(ctx, name: str) -> None:
+    ctx.attempt(lambda: prepare(ctx.directory / name))

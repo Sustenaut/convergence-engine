@@ -14,7 +14,7 @@ Feature: Rounds of read-only walks
     When a round runs
     Then Sustenaut/notifier's last walk has 2 needs
     And Sustenaut/observability's last walk has 1 needs
-    And the log says "convergence: Sustenaut/notifier notifier: 1 ready, 1 missing"
+    And it prints a line matching "convergence: Sustenaut/notifier notifier: 1 ready, 1 missing"
     And storage's buffer holds the facts of 2 walks
     And the facts of Sustenaut/notifier say "github.secret:SLACK" is missing
 
@@ -34,7 +34,7 @@ Feature: Rounds of read-only walks
     Given git cannot clone Sustenaut/shared-infra: "repository not found"
     And the walk of Sustenaut/notifier finds "k8s.namespace:notifier" ready
     When a round runs
-    Then the log says "convergence: no zones for Sustenaut: Sustenaut/shared-infra: git clone failed: fatal: repository not found"
+    Then it prints a line matching "convergence: no zones for Sustenaut: Sustenaut/shared-infra: git clone failed: fatal: repository not found"
     And Sustenaut/notifier was walked with "./pubdeploy check --json --journal https://storage.test"
 
   Scenario: With a Bitwarden read token, the walk runs through ./pubsec run
@@ -68,7 +68,7 @@ Feature: Rounds of read-only walks
     Given storage refuses everything
     And the walk of Sustenaut/notifier finds "k8s.namespace:notifier" ready
     When a round runs
-    Then the log says "convergence: Sustenaut/notifier notifier: no facts put (RuntimeError)"
+    Then it prints a line matching "convergence: Sustenaut/notifier notifier: no facts put (RuntimeError)"
     And Sustenaut/notifier's last walk has 1 needs
 
   Scenario: Without a buffer, no facts are put
@@ -80,7 +80,7 @@ Feature: Rounds of read-only walks
   Scenario: A walk with no needs says so
     Given the walk of Sustenaut/notifier finds no needs
     When a round runs
-    Then the log says "convergence: Sustenaut/notifier notifier: no needs"
+    Then it prints a line matching "convergence: Sustenaut/notifier notifier: no needs"
 
   Scenario: A state repository that cannot be cloned stops the round
     Given git cannot clone Sustenaut/release-state: "repository not found"
@@ -100,27 +100,37 @@ Feature: Rounds of read-only walks
   Scenario: One round at a time
     Given a round is running
     When a round is asked for
-    Then it is not started
+    Then the result is "false"
 
   Scenario Outline: The engine is healthy while rounds end in time
     Given the engine started <started> minutes ago and its last round ended <ended> minutes ago
-    Then the engine is <health>
+    When the engine's health is asked
+    Then the result is "<healthy>"
 
     Examples:
-      | started | ended | health    |
-      | 5       | none  | healthy   |
-      | 80      | none  | unhealthy |
-      | 200     | 40    | healthy   |
-      | 200     | 80    | unhealthy |
+      | started | ended | healthy |
+      | 5       | none  | true    |
+      | 80      | none  | false   |
+      | 200     | 40    | true    |
+      | 200     | 80    | false   |
 
   Scenario: Many services give a round more time before it counts as stuck
     Given a round listed 8 services
     And the engine started 200 minutes ago and its last round ended 130 minutes ago
-    Then the engine is healthy
+    When the engine's health is asked
+    Then the result is "true"
 
   Scenario: A fresh work claim gets its home, caches and clones
-    When the work directory is prepared
-    Then it has "home, cache, clones"
+    Given a scratch directory
+    When the work directory "fresh" is prepared
+    Then the directory "fresh" holds:
+      """
+      cache/
+      clones/
+      home/
+      """
 
   Scenario: Rounds do not overlap across threads
-    Then rounds do not overlap across threads
+    Given a round is running
+    When a round is asked for from another thread
+    Then the result is "false"

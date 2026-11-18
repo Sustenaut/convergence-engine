@@ -25,7 +25,7 @@ from convergence.page import create_app
 from convergence.runs import HEAD, Runs
 
 from .fakes import Storage, journal
-from .world import REPOSITORY, SITE, WHO, World, person
+from .world import REPOSITORY, SITE, WHO, World, answered, person
 
 scenarios("runs.feature")
 
@@ -118,8 +118,10 @@ class Live:
 
 
 @pytest.fixture
-def live(tmp_path) -> Live:
-    return Live(World(tmp_path))
+def live(ctx, tmp_path) -> Live:
+    found = Live(World(tmp_path))
+    found.ctx = ctx
+    return found
 
 
 def _bind(live: Live, runs: Runs | None) -> None:
@@ -235,7 +237,8 @@ def refuse_later(live: Live) -> None:
 
 def _ask(live: Live, body: dict, token: str | None = None):
     w = live.world
-    live.answer = w.client.post("/requests", json=body, headers={"Authorization": f"Bearer {token or w.token()}"})
+    live.answer = answered(live.ctx, w.client.post("/requests", json=body,
+                                                   headers={"Authorization": f"Bearer {token or w.token()}"}))
     if live.answer.status_code == 201 and live.runs is not None:
         live.run = live.runs.runs[live.answer.json()["id"]]
     return live.answer
@@ -393,8 +396,8 @@ def new_pod(live: Live) -> None:
 
 @when("the person starts a live fulfil of the unit on the page")
 def page_start(live: Live) -> None:
-    live.answer = live.world.client.post("/runs", json={"repository": REPOSITORY, "unit": "notifier",
-                                                         "mode": "fulfil"}, headers=person())
+    live.answer = answered(live.ctx, live.world.client.post(
+        "/runs", json={"repository": REPOSITORY, "unit": "notifier", "mode": "fulfil"}, headers=person()))
     live.world.approvals.wait()
     live.run = live.runs.runs[live.answer.json()["id"]]
 
@@ -421,17 +424,17 @@ def asks_wrong(live: Live, asker: str, how: str) -> None:
         _bind(live, None)
         _ask(live, {"kind": "fulfil", "unit": "notifier", "mode": "live"})
     elif how == "to start a run of mode \"fast\"":
-        live.answer = w.client.post("/runs", json={"mode": "fast"}, headers=person())
+        live.answer = answered(live.ctx, w.client.post("/runs", json={"mode": "fast"}, headers=person()))
     elif how == "to start a run with a body that is not JSON":
-        live.answer = w.client.post("/runs", content=b"{", headers=person())
+        live.answer = answered(live.ctx, w.client.post("/runs", content=b"{", headers=person()))
     elif how == "to start a run of a unit not there":
-        live.answer = w.client.post("/runs", json={"repository": REPOSITORY, "unit": "x", "mode": "fulfil"},
-                                    headers=person())
+        live.answer = answered(live.ctx, w.client.post(
+            "/runs", json={"repository": REPOSITORY, "unit": "x", "mode": "fulfil"}, headers=person()))
     elif how == "to start a run on an engine with no runs":
         _bind(live, None)
-        live.answer = w.client.post("/runs", json={"mode": "fulfil"}, headers=person())
+        live.answer = answered(live.ctx, w.client.post("/runs", json={"mode": "fulfil"}, headers=person()))
     else:
-        live.answer = w.client.get("/runs/nope", headers=person())
+        live.answer = answered(live.ctx, w.client.get("/runs/nope", headers=person()))
 
 
 @when("25 hours pass")
@@ -661,11 +664,6 @@ def wrong_key(live: Live, status: int) -> None:
 def approve_again(live: Live, status: int) -> None:
     assert live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": live.run.plan_key},
                                   headers=person()).status_code == status
-
-
-@then(parsers.parse("the answer is {status:d}"))
-def answer_is(live: Live, status: int) -> None:
-    assert live.answer.status_code == status, live.answer.text
 
 
 @then(parsers.parse("stopping it is refused with {status:d}"))

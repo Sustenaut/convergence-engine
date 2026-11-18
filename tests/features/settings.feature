@@ -6,12 +6,15 @@ Feature: The services, and the engine's settings
   Scenario: Only the repositories with the role are services, in name order
     Given a state file '{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}, "Auth": {"deploy": true}, "pubrules": {"board": true}, "maps": {"deploy": "yes"}, "schryer/visit-ee": {"deploy": true}, "odd": []}}'
     When I list its services
-    Then the services are "schryer/visit-ee, Sustenaut/Auth, Sustenaut/notifier"
+    Then the result is:
+      """
+      ["schryer/visit-ee", "Sustenaut/Auth", "Sustenaut/notifier"]
+      """
 
   Scenario Outline: A state file that is wrong is refused, and says why
     Given a state file '<text>'
     When I list its services
-    Then it is refused with "<message>"
+    Then it is refused, saying "<message>"
 
     Examples:
       | text                                                   | message                              |
@@ -21,23 +24,27 @@ Feature: The services, and the engine's settings
 
   Scenario: The defaults are Sustenaut's
     Given no settings
-    Then the state repositories are "Sustenaut/release-state"
-    And Sustenaut's zones are in "Sustenaut/shared-infra"
-    And a round comes every 1800 seconds
-    And the first round waits 300 seconds
-    And there is no Bitwarden token file
+    When the settings are read
+    Then the result's "states" is "["Sustenaut/release-state"]"
+    And the result's "zones" is "{"Sustenaut": "Sustenaut/shared-infra"}"
+    And the result's "every_seconds" is "1800"
+    And the result's "first_round_seconds" is "300"
+    And the result's "bitwarden_token" is "null"
+    And the result's "requesters" is "[]"
 
   Scenario: Settings name more state repositories, and a token file
     Given the setting CONVERGENCE_STATES is "Sustenaut/release-state, schryer/release-state-schryer"
     And the setting CONVERGENCE_BITWARDEN_TOKEN_FILE is "/var/run/secrets/bitwarden/read-token"
     And the setting CONVERGENCE_EVERY_MINUTES is "15"
-    Then the state repositories are "Sustenaut/release-state, schryer/release-state-schryer"
-    And a round comes every 900 seconds
-    And the Bitwarden token file is "/var/run/secrets/bitwarden/read-token"
+    When the settings are read
+    Then the result's "states" is "["Sustenaut/release-state", "schryer/release-state-schryer"]"
+    And the result's "every_seconds" is "900"
+    And the result's "bitwarden_token" is "/var/run/secrets/bitwarden/read-token"
 
   Scenario Outline: Settings that are wrong are refused
     Given the setting <name> is "<value>"
-    Then the settings are refused with "<message>"
+    When the settings are read
+    Then it is refused, saying "<message>"
 
     Examples:
       | name                      | value               | message                                                 |
@@ -51,50 +58,112 @@ Feature: The services, and the engine's settings
       | CONVERGENCE_REQUESTERS    | integrations        | CONVERGENCE_REQUESTERS is NAMESPACE:NAME, comma-separated |
 
   Scenario: `python -m convergence services` prints a state file's services
-    Given a state file '{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}}}' on disk
-    When I run convergence "services" on it
-    Then it succeeds and prints "Sustenaut/notifier"
+    Given a scratch directory
+    And a file "state.json" holding "{"owner": "Sustenaut", "repos": {"notifier": {"deploy": true}}}"
+    When convergence runs "services state.json"
+    Then it succeeds
+    And it prints:
+      """
+      Sustenaut/notifier
+      """
 
   Scenario: With no service, it says so
-    Given a state file '{"owner": "Sustenaut", "repos": {}}' on disk
-    When I run convergence "services" on it
-    Then it succeeds and prints "convergence: no repository has the role deploy"
+    Given a scratch directory
+    And a file "state.json" holding "{"owner": "Sustenaut", "repos": {}}"
+    When convergence runs "services state.json"
+    Then it succeeds
+    And it prints:
+      """
+      convergence: no repository has the role deploy
+      """
 
   Scenario: A state file it cannot read fails
-    Given a state file 'nope' on disk
-    When I run convergence "services" on it
-    Then it fails with 1
+    Given a scratch directory
+    And a file "state.json" holding "nope"
+    When convergence runs "services state.json"
+    Then the exit code is 1
+    And stderr mentions "convergence: state.json is not JSON"
 
   Scenario: Without a command, it says how to run it
-    When I run convergence "" on nothing
-    Then it fails with 2
+    When convergence runs with no command
+    Then the exit code is 2
+    And stderr mentions "python -m convergence services STATE.json: the services a state file lists"
 
   Scenario: secret-readers.yaml is generated from the service list
-    Given a state file '{"owner": "Sustenaut", "repos": {"svc": {"deploy": true}, "other": {"board": true}}}' on disk
-    And a checkout of svc whose deploy block has the namespace "svc" and a unit in "svc-eu"
-    When I run convergence "secret-readers" on it with the checkouts
-    Then it succeeds and binds the namespaces "convergence, svc, svc-eu"
+    Given a scratch directory
+    And a file "state.json" holding "{"owner": "Sustenaut", "repos": {"svc": {"deploy": true}, "other": {"board": true}}}"
+    And a file "co/svc/pubrules.json" holding "{"deploy": {"namespace": "svc", "units": {"eu": {"namespace": "svc-eu"}, "odd": "x"}}}"
+    When convergence runs "secret-readers state.json co"
+    Then it succeeds
+    And it prints:
+      """
+      # Generated by `python -m convergence secret-readers STATE.json CHECKOUTS`: do not edit.
+      # The namespaces whose Secrets the engine may read, for the k8s.secret and
+      # k8s.secrets-declared checks (key names and value lengths, never a value shown): every
+      # deploy service's units', and its own. kube-system and the rest stay out of reach.
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: convergence-secret-read
+        namespace: convergence
+      roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: convergence-secret-read}
+      subjects: [{kind: ServiceAccount, name: app, namespace: convergence}]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: convergence-secret-read
+        namespace: svc
+      roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: convergence-secret-read}
+      subjects: [{kind: ServiceAccount, name: app, namespace: convergence}]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: convergence-secret-read
+        namespace: svc-eu
+      roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: convergence-secret-read}
+      subjects: [{kind: ServiceAccount, name: app, namespace: convergence}]
+      """
 
   Scenario: A service not checked out beside the others fails the generation
-    Given a state file '{"owner": "Sustenaut", "repos": {"svc": {"deploy": true}}}' on disk
-    When I run convergence "secret-readers" on it with the checkouts
-    Then it fails with 1
+    Given a scratch directory
+    And a file "state.json" holding "{"owner": "Sustenaut", "repos": {"svc": {"deploy": true}}}"
+    When convergence runs "secret-readers state.json co"
+    Then the exit code is 1
+    And stderr mentions "co/svc/pubrules.json could not be read: check Sustenaut/svc out beside the others"
 
   Scenario: The image's lock, pointed at the mirrors, keeps every hash
     Given an image lock with a GitHub release wheel and a PyPI package
     When it is pointed at the mirrors
-    Then the wheel comes from "https://storage.sustenaut.eu/wheels/f/<its sha256>/pkg-1.0-py3-none-any.whl"
-    And the PyPI package and every hash are as they were
+    Then the result is:
+      """
+      pkg @ https://storage.sustenaut.eu/wheels/f/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/pkg-1.0-py3-none-any.whl \
+          --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          # via -r requirements.in
+      fastapi==1.0 \
+          --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+
+      """
 
   Scenario: The Google pool and the pod's two token files are settings
     Given the setting CONVERGENCE_GOOGLE_POOL is "projects/1/locations/global/workloadIdentityPools/convergence"
-    Then the Google read token file is "/var/run/secrets/google-read/token"
+    When the settings are read
+    Then the result's "google_pool" is "projects/1/locations/global/workloadIdentityPools/convergence"
+    And the result's "google_read_token" is "/var/run/secrets/google-read/token"
+    And the result's "google_write_token" is "/var/run/secrets/google-write/token"
 
   Scenario: Requests have their own settings
     Given the setting CONVERGENCE_REQUESTERS is "integrations:app, notifier:app"
     And the setting CONVERGENCE_REQUEST_OWNERS is "Sustenaut, schryer"
     And the setting CONVERGENCE_REQUEST_HOURS is "12"
-    Then the requests settings are 12 hours, owners "Sustenaut, schryer" and requesters "integrations:app, notifier:app"
+    When the settings are read
+    Then the result's "request_hours" is "12"
+    And the result's "request_owners" is "["Sustenaut", "schryer"]"
+    And the result's "requesters" is "["integrations:app", "notifier:app"]"
+    And the result's "site" is "https://convergence.sustenaut.eu"
 
   Scenario: The pod module builds nothing without its settings
-    Then the pod module builds nothing without its settings
+    Given the environment does not set "CONVERGENCE_SERVE"
+    When the pod module is loaded
+    Then the result is empty

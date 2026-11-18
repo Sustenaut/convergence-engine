@@ -11,15 +11,14 @@ import json
 import re
 from pathlib import Path
 
-import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence.approvals import Ask
 from convergence.callers import Requester
-from convergence.tokens import READ, Tokens
+from convergence.tokens import Tokens
 
 from .fakes import journal
-from .world import REPOSITORY, SITE, WHO, World, person
+from .world import REPOSITORY, SITE, WHO, World, answered, person
 
 scenarios("fulfil.feature")
 
@@ -42,33 +41,78 @@ class Caller:
         return Answer()
 
 
-@then("the rounds token may only read and is reused")
-def the_rounds_token_may_only_read_and_is_reused():
-    caller, now = Caller(), [1000.0]
-    tokens = Tokens(caller, "1", "key", "9", sign=lambda *a: "jwt", clock=lambda: now[0])
-    assert tokens.read() == "ghs_1" and tokens.read() == "ghs_1"
-    assert json.loads(caller.asked[0].body) == {"permissions": READ}
-    assert all(v == "read" for v in READ.values())
-    now[0] += 46 * 60
-    assert tokens.read() == "ghs_2"
+@given("GitHub's token mint")
+def mint(ctx) -> None:
+    ctx.caller, ctx.clock = Caller(), [1000.0]
 
 
-@then("a fulfils token has the installations permissions and is minted each time")
-def a_fulfils_token_has_the_installations_permissions_and_is_minted_each_time():
-    caller = Caller()
-    tokens = Tokens(caller, "1", "key", "9", sign=lambda *a: "jwt")
-    assert tokens.write() == "ghs_1" and tokens.write() == "ghs_2"
-    assert caller.asked[0].body is None
+@given("GitHub's token mint, which refuses")
+def mint_refuses(ctx) -> None:
+    ctx.caller, ctx.clock = Caller(ok=False), [1000.0]
 
 
-@then("a refused mint raises")
-def a_refused_mint_raises():
-    from integrations.calls import Refused
-    with pytest.raises(Refused):
-        Tokens(Caller(ok=False), "1", "key", "9", sign=lambda *a: "jwt").read()
+def _tokens(ctx) -> Tokens:
+    return Tokens(ctx.caller, "1", "key", "9", sign=lambda *a: "jwt", clock=lambda: ctx.clock[0])
+
+
+def _minted(ctx, tokens: list[str]) -> dict:
+    """The tokens it got, and what each mint asked for (the body's JSON, or null for none)."""
+    return {"tokens": tokens, "asked": [json.loads(r.body) if r.body else None for r in ctx.caller.asked]}
+
+
+@when("the rounds token is asked for twice, then again 46 minutes later")
+def rounds_tokens(ctx) -> None:
+    def ask() -> dict:
+        tokens = _tokens(ctx)
+        got = [tokens.read(), tokens.read()]
+        ctx.clock[0] += 46 * 60
+        return _minted(ctx, [*got, tokens.read()])
+    ctx.attempt(ask)
+
+
+@when("the rounds token is asked for")
+def rounds_token(ctx) -> None:
+    ctx.attempt(lambda: _tokens(ctx).read())
+
+
+@when("the fulfils token is asked for twice")
+def fulfils_tokens(ctx) -> None:
+    def ask() -> dict:
+        tokens = _tokens(ctx)
+        return _minted(ctx, [tokens.write(), tokens.write()])
+    ctx.attempt(ask)
 
 
 POOL = "projects/1/locations/global/workloadIdentityPools/convergence"
+
+
+def _google(w: World, tmp_path: Path) -> World:
+    w.engine.settings = dataclasses.replace(
+        w.engine.settings, google_pool=POOL, google_reader="reader@p.iam.gserviceaccount.com",
+        google_admin="admin@p.iam.gserviceaccount.com", google_read_token=tmp_path / "gread",
+        google_write_token=tmp_path / "gwrite")
+    w.engine.google = w.engine._google()  # noqa: SLF001
+    return w
+
+
+@given("the engine", target_fixture="world")
+def engine(tmp_path: Path) -> World:
+    return World(tmp_path)
+
+
+@given("the engine with a Google pool", target_fixture="world")
+def engine_google(tmp_path: Path) -> World:
+    return _google(World(tmp_path), tmp_path)
+
+
+@when("it walks Sustenaut/notifier")
+def it_walks(ctx, world: World) -> None:
+    """A round; what came of it is the environment its one walk had."""
+    def walks() -> dict:
+        world.engine.round()
+        (env,) = world.walk_envs(fulfil=False)
+        return env
+    ctx.attempt(walks)
 
 
 @given("the engine has walked Sustenaut/notifier", target_fixture="world")
@@ -87,12 +131,7 @@ def walked_without_write(tmp_path: Path) -> World:
 
 @given("the engine with a Google pool has walked Sustenaut/notifier", target_fixture="world")
 def walked_with_google(tmp_path: Path) -> World:
-    w = World(tmp_path)
-    w.engine.settings = dataclasses.replace(
-        w.engine.settings, google_pool=POOL, google_reader="reader@p.iam.gserviceaccount.com",
-        google_admin="admin@p.iam.gserviceaccount.com", google_read_token=tmp_path / "gread",
-        google_write_token=tmp_path / "gwrite")
-    w.engine.google = w.engine._google()  # noqa: SLF001
+    w = _google(World(tmp_path), tmp_path)
     w.engine.round()
     return w
 
@@ -203,11 +242,11 @@ VIEWERS = {"the person": person(), "no one signed in": {}, "the person without t
 
 @when(parsers.re(r"(?P<viewer>the person|no one signed in|the person without the role|"
                  r"the person, with the role on the second of two group lines) opens the service page"))
-def opens_service(world: World, viewer: str) -> None:
+def opens_service(ctx, world: World, viewer: str) -> None:
     headers = VIEWERS[viewer]
     if headers is None:  # oauth2-proxy adds one line per group
         headers = [("X-Forwarded-Email", WHO), ("X-Forwarded-Groups", "people"), ("X-Forwarded-Groups", "convergence")]
-    world.answer = world.client.get(f"/services/{REPOSITORY}", headers=headers)
+    world.answer = answered(ctx, world.client.get(f"/services/{REPOSITORY}", headers=headers))
 
 
 @then("Fulfil notifier can be pressed, at the top and on the unit")
@@ -262,21 +301,23 @@ def walk_running_now(world: World) -> None:
 
 
 @when("the person posts the Fulfil form they had")
-def posts_form_had(world: World) -> None:
-    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=world.form, headers=person())
+def posts_form_had(ctx, world: World) -> None:
+    world.answer = answered(ctx, world.client.post(f"/services/{REPOSITORY}/fulfil", data=world.form,
+                                                   headers=person()))
 
 
 @when("the person posts the Fulfil form and the walk makes it ready")
-def post_form(world: World) -> None:
+def post_form(ctx, world: World) -> None:
     _makes_ready(world)
-    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world), follow_redirects=False,
-                                     headers=person())
+    world.answer = answered(ctx, world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world),
+                                                   follow_redirects=False, headers=person()))
     world.wait()
 
 
 @when(parsers.parse('the person posts the Fulfil form for the unit "{unit}"'))
-def post_form_unit(world: World, unit: str) -> None:
-    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world, unit), headers=person())
+def post_form_unit(ctx, world: World, unit: str) -> None:
+    world.answer = answered(ctx, world.client.post(f"/services/{REPOSITORY}/fulfil", data=form_of(world, unit),
+                                                   headers=person()))
 
 
 @then("the answer sends them to the request's page")
@@ -311,39 +352,21 @@ FORMS = {"their form": {}, "a form with another token": {"token": "0" * 64}}
 
 
 @when(parsers.parse("{asker} posts a fulfil with {form}"))
-def posts_fulfil(world: World, asker: str, form: str) -> None:
+def posts_fulfil(ctx, world: World, asker: str, form: str) -> None:
     data = {**form_of(world), **FORMS[form]}
-    world.answer = world.client.post(f"/services/{REPOSITORY}/fulfil", data=data, headers=ASKERS[asker])
+    world.answer = answered(ctx, world.client.post(f"/services/{REPOSITORY}/fulfil", data=data,
+                                                   headers=ASKERS[asker]))
 
 
-@then(parsers.re(r"the page answers (?P<status>\d+)"), converters={"status": int})
-def page_answers(world: World, status: int) -> None:
-    assert world.answer.status_code == status
-
-
-@then(parsers.parse('the page answers {status:d} saying "{text}"'))
-def page_answers_saying(world: World, status: int, text: str) -> None:
-    assert world.answer.status_code == status and text in world.answer.text
-
-
-@then("a rounds walk holds no write token")
-def a_rounds_walk_holds_no_write_token(world: World) -> None:
-    (env,) = world.walk_envs(fulfil=False)
-    assert "PUBSEC_WRITE_TOKEN_FILE" not in env and env["GH_TOKEN"] == "ghs_read"
-    assert "bws-write" not in json.dumps(env)
-
-
-@then("a round gets the read paths google credential alone")
-def a_round_gets_the_read_paths_google_credential_alone(world: World, tmp_path: Path) -> None:
-    (env,) = world.walk_envs(fulfil=False)
+@then("the walk's Google credential is the read path's")
+def google_read(ctx, tmp_path: Path) -> None:
+    env = ctx.result
     read = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
     assert read["audience"] == f"//iam.googleapis.com/{POOL}/providers/read"
     assert read["credential_source"] == {"file": str(tmp_path / "gread")}
     assert "reader@p.iam.gserviceaccount.com" in read["service_account_impersonation_url"]
     assert env["CLOUDSDK_CONFIG"] == str(tmp_path / "google" / "read" / "gcloud")
-    assert env["CLOUDSDK_CORE_DISABLE_USAGE_REPORTING"] == "true"
     assert "gwrite" not in json.dumps(env) and "admin@" not in json.dumps(env)
-    assert "PUBSEC_GCP_KEYS_GRANTED_IN" not in env
 
 
 @then("the fulfil got the write paths google credential and its own gcloud directory")
@@ -356,7 +379,6 @@ def the_fulfil_got_the_write_path(world: World, tmp_path: Path) -> None:
     assert env["PUBSEC_GCP_KEYS_GRANTED_IN"].endswith("infra/convergence-keys.tf")
 
 
-@then("no walk gets a google credential")
-def no_google(world: World) -> None:
-    (env,) = world.walk_envs(fulfil=False)
-    assert not any(k.startswith("CLOUDSDK_") for k in env)
+@then(parsers.parse('the result has no key starting "{prefix}"'))
+def no_key_starting(ctx, prefix: str) -> None:
+    assert not [k for k in ctx.result if k.startswith(prefix)], ctx.result

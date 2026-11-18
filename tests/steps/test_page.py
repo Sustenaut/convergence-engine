@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from convergence import page
 from convergence.approvals import Approvals, Ledger
 from convergence.clones import Clones
 from convergence.config import settings
@@ -19,6 +22,7 @@ from convergence.page import create_app
 from convergence.walker import Walk
 
 from .fakes import Storage, journal
+from .world import client_of
 
 scenarios("../features/page.feature")
 
@@ -31,12 +35,16 @@ class World:
         self.storage = Storage()
         self.client = TestClient(create_app(self.engine, Journals(self.storage),
                                             Approvals(self.engine, Ledger(self.storage), log=lambda line: None)))
-        self.answer = None
 
 
 @pytest.fixture
 def world(tmp_path: Path) -> World:
     return World(tmp_path)
+
+
+@pytest.fixture
+def http_client(world: World):
+    return client_of(world)
 
 
 def _parse(found: str) -> tuple[dict, dict, dict]:
@@ -104,78 +112,48 @@ def health(world: World, health: str) -> None:
         world.now += 10 * 3600
 
 
-@when(parsers.parse('I open "{path}"'))
-def open_(world: World, path: str) -> None:
-    world.answer = world.client.get(path)
+@then(parsers.parse("the answer links to {count:d} walks"))
+def walk_links(ctx, count: int) -> None:
+    assert len(re.findall(r'href="/services/[^"]+/walks/[0-9a-f]{64}"', ctx.answer.text)) == count
 
 
-@when(parsers.parse("I open the first walk of {slug}"))
-def open_first(world: World, slug: str) -> None:
-    world.answer = world.client.get(f"/services/{slug}/walks/{'a' * 64}")
+def _pinned() -> dict:
+    return json.loads((page.THEME_DIR.parent / "theme.json").read_text())
 
 
-@then(parsers.parse('the page shows "{text}"'))
-def shows(world: World, text: str) -> None:
-    assert world.answer.status_code == 200 and text in world.answer.text, world.answer.text
+@when("theme.json is read")
+def theme_json(ctx) -> None:
+    ctx.attempt(_pinned)
 
 
-@then(parsers.parse('the page does not show "{text}"'))
-def not_shows(world: World, text: str) -> None:
-    assert text not in world.answer.text
+@when("theme.json's version is read")
+def theme_version(ctx) -> None:
+    ctx.attempt(lambda: _pinned()["version"])
 
 
-@then(parsers.parse("the page shows {count:d} links to walks"))
-def walk_links(world: World, count: int) -> None:
-    assert len(re.findall(r'href="/services/[^"]+/walks/[0-9a-f]{64}"', world.answer.text)) == count
+@when("every file theme.json pins is fetched")
+def theme_fetched(ctx, world: World) -> None:
+    def unlike_pin() -> list[str]:
+        files = _pinned()["files"]
+        assert files, "theme.json pins no file"
+        unlike = []
+        for name, sha in ((f["path"], f["sha256"]) for f in files):
+            answer = world.client.get(f"/theme/{name}")
+            if answer.status_code != 200 or hashlib.sha256(answer.content).hexdigest() != sha:
+                unlike.append(name)
+        return unlike
+    ctx.attempt(unlike_pin)
 
 
-@then("the page is private and runs no script")
-def private(world: World) -> None:
-    assert world.answer.headers["Cache-Control"] == "private, no-store"
-    policy = world.answer.headers["Content-Security-Policy"]
-    assert policy.startswith("default-src 'none'") and "script-src" not in policy
-    assert "<script" not in world.answer.text
-
-
-@then(parsers.parse("the answer is {status:d}"))
-def answer_is(world: World, status: int) -> None:
-    assert world.answer.status_code == status, world.answer.text
-
-
-@then("the page links the theme's fonts, tokens and base styles")
-def links_theme(world: World) -> None:
-    for name in ("fonts.css", "tokens.css", "base.css"):
-        assert f'<link rel="stylesheet" href="/theme/{name}">' in world.answer.text
-    assert "style-src 'self' 'unsafe-inline'; font-src 'self'" in world.answer.headers["Content-Security-Policy"]
-
-
-@then("every theme file is served as theme.json pins it")
-def theme_served(world: World) -> None:
-    import hashlib
-    from convergence import page
-    pinned = json.loads((page.THEME_DIR.parent / "theme.json").read_text())
-    assert pinned["repository"] == "Sustenaut/theme" and pinned["version"].startswith("v")
-    for name, sha in ((f["path"], f["sha256"]) for f in pinned["files"]):
-        answer = world.client.get(f"/theme/{name}")
-        assert answer.status_code == 200 and hashlib.sha256(answer.content).hexdigest() == sha
-    assert world.client.get("/theme/fonts/nunito-latin-wght-normal.woff2").headers["content-type"] == "font/woff2"
-    assert world.client.get("/theme/tokens.css").headers["content-type"].startswith("text/css")
-
-
-@then("a file that is not the theme's is 404")
-def theme_404(world: World) -> None:
-    assert world.client.get("/theme/../theme.json").status_code == 404
-    assert world.client.get("/theme/nope.css").status_code == 404
-
-
-@then("a theme file whose bytes differ from theme.json is not served")
-def theme_differs(world: World, tmp_path: Path, monkeypatch) -> None:
-    import shutil
-    from convergence import page
+@given("a copy of the theme whose base.css differs from its pin")
+def theme_copy(tmp_path: Path, monkeypatch) -> None:
     copy = tmp_path / "convergence"
     shutil.copytree(page.THEME_DIR, copy / "theme")
     shutil.copy(page.THEME_DIR.parent / "theme.json", copy / "theme.json")
     (copy / "theme" / "base.css").write_text("body{}")
     monkeypatch.setattr(page, "THEME_DIR", copy / "theme")
-    served = page._theme()  # noqa: SLF001
-    assert "base.css" not in served and "tokens.css" in served
+
+
+@when("the theme is loaded")
+def theme_loaded(ctx) -> None:
+    ctx.attempt(page._theme)  # noqa: SLF001 - what the app serves

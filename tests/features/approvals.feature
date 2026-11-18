@@ -15,7 +15,11 @@ Feature: Requests a person approves first
 
   Scenario Outline: A GitHub token that does not count is refused and nothing is stored
     When a GitHub run asks for a gate with <token>
-    Then the answer is <status> refusing "<reason>"
+    Then the answer is <status>
+    And the answer is the JSON:
+      """
+      {"refused": "<reason>"}
+      """
     And no request is stored and the journal holds 0 events
 
     Examples:
@@ -41,14 +45,37 @@ Feature: Requests a person approves first
   Scenario: GitHub's keys that cannot be fetched let no one in
     Given GitHub's keys cannot be fetched
     When a GitHub run asks for a gate with the plan "x"
-    Then the answer is 503 refusing "keys-unavailable"
+    Then the answer is 503
+    And the answer is the JSON:
+      """
+      {"refused": "keys-unavailable"}
+      """
 
   Scenario: GitHub's keys come through the engine's call log
-    Then the keys are fetched through the caller, and a refusal lets no one in
+    Given GitHub's keys come through the engine's caller
+    When a GitHub run's token is verified
+    Then the result's "repository" is "Sustenaut/notifier"
+    And the caller was asked once, for "github.actions-oidc identity https://token.actions.githubusercontent.com/.well-known/jwks"
+
+  Scenario: Through the caller too, a token of another issuer is refused
+    Given GitHub's keys come through the engine's caller
+    When a GitHub run's token of the issuer "https://elsewhere.example" is verified
+    Then it is refused, saying "wrong-issuer"
+    And the refusal's "status" is "401"
+
+  Scenario: GitHub's keys the caller cannot fetch let no one in
+    Given GitHub's keys come through the engine's caller, which is refused
+    When a GitHub run's token is verified
+    Then it is refused, saying "keys-unavailable"
+    And the refusal's "status" is "503"
 
   Scenario Outline: A request that is not well formed is refused
     When a GitHub run posts <body>
-    Then the answer is <status> refusing "<reason>"
+    Then the answer is <status>
+    And the answer is the JSON:
+      """
+      {"refused": "<reason>"}
+      """
 
     Examples:
       | body                            | status | reason          |
@@ -67,7 +94,11 @@ Feature: Requests a person approves first
 
   Scenario Outline: A ServiceAccount that does not count is refused
     When <account> asks for <kind>
-    Then the answer is <status> refusing "<reason>"
+    Then the answer is <status>
+    And the answer is the JSON:
+      """
+      {"refused": "<reason>"}
+      """
 
     Examples:
       | account                                  | kind     | status | reason             |
@@ -79,18 +110,30 @@ Feature: Requests a person approves first
 
   Scenario: A token of neither GitHub's nor the cluster's issuer is refused without asking the cluster
     When a GitHub run asks for a gate with a token of another issuer
-    Then the answer is 401 refusing "bad-token"
+    Then the answer is 401
+    And the answer is the JSON:
+      """
+      {"refused": "bad-token"}
+      """
     And the cluster was not asked
 
   Scenario: Without a cluster only GitHub's tokens count
     Given the engine has no TokenReview
     When the ServiceAccount integrations:app asks for a gate with the plan "x"
-    Then the answer is 401 refusing "bad-token"
+    Then the answer is 401
+    And the answer is the JSON:
+      """
+      {"refused": "bad-token"}
+      """
 
   Scenario: Without callers no request is taken
     Given the engine takes no callers
     When a GitHub run asks for a gate with the plan "x"
-    Then the answer is 503 refusing "no-callers"
+    Then the answer is 503
+    And the answer is the JSON:
+      """
+      {"refused": "no-callers"}
+      """
 
   Scenario: A gate's caller polls until a person approves it
     Given a GitHub run asked for a gate with the plan "<b>Deploy</b> notifier"
@@ -106,11 +149,23 @@ Feature: Requests a person approves first
   Scenario: Another identity's poll is refused
     Given a GitHub run asked for a gate with the plan "x"
     When another run of the repository polls it
-    Then the answer is 403 refusing "not-your-request"
+    Then the answer is 403
+    And the answer is the JSON:
+      """
+      {"refused": "not-your-request"}
+      """
     When the ServiceAccount integrations:app polls it
-    Then the answer is 403 refusing "not-your-request"
+    Then the answer is 403
+    And the answer is the JSON:
+      """
+      {"refused": "not-your-request"}
+      """
     When the run polls a request that is not there
-    Then the answer is 403 refusing "not-your-request"
+    Then the answer is 403
+    And the answer is the JSON:
+      """
+      {"refused": "not-your-request"}
+      """
 
   Scenario: A ServiceAccount polls its own gate
     Given the ServiceAccount integrations:app asked for a gate with the plan "x"
@@ -209,14 +264,19 @@ Feature: Requests a person approves first
   Scenario: A request whose first event the journal refuses is not taken
     Given storage refuses every write
     When a GitHub run asks for a gate with the plan "x"
-    Then the answer is 503 refusing "journal-refused"
+    Then the answer is 503
+    And the answer is the JSON:
+      """
+      {"refused": "journal-refused"}
+      """
     And no request is stored and the journal holds 0 events
 
   Scenario: An approval the journal refuses does not happen
     Given a GitHub run asked for a gate with the plan "x"
     And storage refuses every write
     When the person approves it
-    Then the page answers 409 saying "the journal refused it"
+    Then the answer is 409
+    And the answer includes "the journal refused it"
     And the request is "awaiting"
 
   Scenario: A plan the journal refuses ends the request
@@ -251,8 +311,15 @@ Feature: Requests a person approves first
     Then the gate is still "awaiting" and can be approved
     And the approved fulfil runs, and the planning one ended "failed"
 
-  Scenario: A new pod with no head starts empty, and one storage refuses does not start
-    Then a new head starts empty, and a refused head stops the start
+  Scenario: A new pod with no head starts empty
+    Given a storage with no head
+    When a new pod starts the approvals from that storage
+    Then the result is empty
+
+  Scenario: A new pod whose head storage refuses does not start
+    Given a storage that refuses, saying "storage said 503"
+    When a new pod starts the approvals from that storage
+    Then it is refused, saying "storage said 503"
 
   Scenario: The approvals page lists open requests first, then the ended ones
     Given a GitHub run asked for a gate with the plan "x"
@@ -273,7 +340,7 @@ Feature: Requests a person approves first
   Scenario Outline: Approve and Decline are for a signed in person with the role, on this site, with their form
     Given a GitHub run asked for a gate with the plan "x"
     When <asker> posts <decision> with <form>
-    Then the page answers <status>
+    Then the answer is <status>
     And the request is "awaiting"
 
     Examples:
@@ -306,7 +373,8 @@ Feature: Requests a person approves first
   Scenario: An Approve after another person's decision says what happened
     Given a GitHub run asked for a gate with the plan "x"
     When another person declines it, and then the person approves it with the form they had
-    Then the page answers 409 saying "that request is declined (other@example.org"
+    Then the answer is 409
+    And the answer includes "that request is declined (other@example.org"
 
   Scenario: A press whose own approval the journal refuses awaits a decision like any request
     When the person presses Fulfil and the journal refuses its approval
@@ -373,7 +441,11 @@ Feature: Requests a person approves first
 
   Scenario: A check of another repository is refused, as a fulfil is
     When a GitHub run posts a check of another repository
-    Then the answer is 403 refusing "other-repository"
+    Then the answer is 403
+    And the answer is the JSON:
+      """
+      {"refused": "other-repository"}
+      """
 
   Scenario: A check's answer gives every need's type, grade, state and what was found
     Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "Secret old-key is in the cluster, and nothing reads or declares it", "k8s.namespace:notifier" ready graded auto
