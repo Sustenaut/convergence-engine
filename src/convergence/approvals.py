@@ -1,10 +1,13 @@
 """Requests: something a caller wants done, which a person approves first.
 
-Two kinds:
+Three kinds:
 
 - `fulfil`: the engine walks one unit with `./pubdeploy walk --fulfil --yes --unit U`,
   as the 4b button did, once a person has approved the plan.
 - `gate`: the caller polls GET /requests/ID and goes on by itself once it is approved.
+- `check`: read-only. The unit's plan walk, then `done` with each need's state (and a note
+  naming any that is not ready); nobody is asked, nothing is fulfilled, and no write token
+  is needed.
 
 A request moves forward only, one state at a time:
 
@@ -45,7 +48,7 @@ from .callers import Refused, Requester
 
 HEAD = "convergence.approvals"
 SCHEMA = "convergence-approval/1"
-KINDS = ("fulfil", "gate")
+KINDS = ("fulfil", "gate", "check")
 OPEN = ("planning", "awaiting", "approved", "running")
 ENDED = ("declined", "expired", "done", "failed")
 PLAN_BYTES = 8192
@@ -287,7 +290,7 @@ class Approvals:
         if str(body.get("repository") or requester.repository) != requester.repository:
             raise Refused(403, "other-repository")
         reason = self.engine.can_fulfil(new.repository, new.unit)
-        if reason:
+        if reason and not (new.kind == "check" and reason == "fulfils-nothing"):  # a check writes nothing
             raise Refused(409, reason)
         taken = self._take(new, "planning")
         self._thread(self._plan, taken)
@@ -331,11 +334,16 @@ class Approvals:
 
     def _walked(self, ask: Ask, by: str) -> list[dict[str, Any]] | str:
         """The unit's plan from a read-only walk, or why there is none."""
+        found = self._journal(ask, by)
+        return found if isinstance(found, str) else plan_of(found)
+
+    def _journal(self, ask: Ask, by: str) -> dict[str, Any] | str:
+        """The unit's journal from a read-only walk, or why there is none."""
         walk = self.engine.check_unit(ask.repository, ask.unit, by)
         if not walk.ok:
             return walk.error
         found = [d for d in walk.documents if d["service"]["unit"] == ask.unit]
-        return plan_of(found[0]) if found else "the walk printed no journal for that unit"
+        return found[0] if found else "the walk printed no journal for that unit"
 
     def _plan(self, ask: Ask) -> None:
         lock = self.engine.walking(ask.repository)
@@ -343,13 +351,19 @@ class Approvals:
             self._end(ask, "failed", "engine", error="a walk of that service kept running")
             return
         try:
-            plan = self._walked(ask, ask.requester.name)
+            journal = self._journal(ask, ask.requester.name)
         except Exception as e:  # noqa: BLE001 - said on the request's page
-            plan = f"the plan walk could not start ({type(e).__name__})"
+            journal = f"the plan walk could not start ({type(e).__name__})"
         finally:
             lock.release()
-        if isinstance(plan, str):
-            self._end(ask, "failed", "engine", error=plan)
+        if isinstance(journal, str):
+            self._end(ask, "failed", "engine", error=journal)
+            return
+        plan = plan_of(journal)
+        if ask.kind == "check":  # read-only: each need's state, and nobody is asked anything
+            left = ", ".join(f"{n['need']} {n['state']}" for n in plan)
+            self._end(ask, "done", "engine", plan=plan, plan_sha256=plan_sha256(plan), needs=needs_of(journal),
+                      note=f"read-only check; not ready: {left}"[:1000] if plan else "read-only check; every need is ready")
             return
         if not plan:
             self._end(ask, "done", "engine", plan=[], plan_sha256=plan_sha256([]), needs=[])

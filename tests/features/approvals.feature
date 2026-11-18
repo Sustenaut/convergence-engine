@@ -349,3 +349,28 @@ Feature: Requests a person approves first
     When a GitHub run asks for a fulfil of the unit "notifier"
     And the request's plan has been walked
     Then the request is "awaiting"
+
+  Scenario: A check walks the unit read-only and ends done with each need's state, asking no one
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with "k8s.secret:s" missing
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the request ends "done" with the note "read-only check; not ready: k8s.secret:s missing"
+    And the run's poll says "done", giving the note "not ready: k8s.secret:s missing"
+
+  Scenario: A check of a unit with every need ready says so
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" ready
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "read-only check; every need is ready"
+
+  Scenario: An engine without a write token still checks
+    Given the engine without a write token has walked Sustenaut/notifier
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "not ready: k8s.secret:s missing"
+
+  Scenario: A check of another repository is refused, as a fulfil is
+    When a GitHub run posts a check of another repository
+    Then the answer is 403 refusing "other-repository"

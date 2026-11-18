@@ -82,6 +82,20 @@ def run_asks_fulfil(world: World, unit: str) -> None:
     assert _post(world, world.token(), {"kind": "fulfil", "unit": unit}).status_code == 201
 
 
+@when(parsers.re(r'a GitHub run asks for a check of the unit "(?P<unit>[^"]+)"'))
+def run_asks_check(world: World, unit: str) -> None:
+    _hold(world)
+    assert _post(world, world.token(), {"kind": "check", "unit": unit}).status_code == 201
+
+
+@given("the engine without a write token has walked Sustenaut/notifier", target_fixture="world")
+def walked_no_write(tmp_path: Path) -> World:
+    w = World(tmp_path, fulfil=False)
+    w.engine.round()
+    w.held, w.bearer = False, ""
+    return w
+
+
 @given(parsers.re(r'a GitHub run asked for a fulfil of the unit "(?P<unit>[^"]+)"'))
 def run_asked_fulfil(world: World, unit: str) -> None:
     run_asks_fulfil(world, unit)
@@ -220,7 +234,8 @@ BODIES = {"a request of another kind": {"kind": "deploy"},
           "a gate without a plan": {"kind": "gate"},
           "a gate whose plan is over 8 KB": {"kind": "gate", "plan": "x" * 8193},
           "a fulfil of another repository": {"kind": "fulfil", "repository": "Sustenaut/other", "unit": "notifier"},
-          "a fulfil of a unit not there": {"kind": "fulfil", "unit": "x"}}
+          "a fulfil of a unit not there": {"kind": "fulfil", "unit": "x"},
+          "a check of another repository": {"kind": "check", "repository": "Sustenaut/other", "unit": "notifier"}}
 RAW = {"a body that is not JSON": b"nope", "a body over 16 KB": json.dumps({"plan": "x" * 17000}).encode()}
 
 
