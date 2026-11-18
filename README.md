@@ -79,7 +79,7 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 
 | Path | What |
 |---|---|
-| `POST /runs/ID/events` | a remote executor's event, `{seq, need, from, to, result?, at}`, with the run's own bearer token; idempotent on the need and its sequence number |
+| `POST /runs/ID/events` | a remote executor's event, `{seq, need, from, to, result?, at}`, with the run's own bearer token: `seq` is the need's own, one more than its last, and `from` its state (409 otherwise); idempotent on the need and its seq |
 | `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` (with `"mode": "live"` and maybe `"modes": {NEED: "check"\|"fulfil"}`, a live run), `{"kind": "check", "unit": "U"}` (read-only: the plan walk, then done with each need's state, asking no one) or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
 | `GET /requests/ID` | the request's state, its plan (each need's name, state and what the fulfil changes) and result (every need's name, type, grade, state and what the walk found, the error, or a note), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
@@ -156,16 +156,17 @@ each need's meta naming its mode, grade, type, stop class, after-edges and budge
 with the run so a later change of the deploy block never rewrites a run in flight. A
 need moves through `waiting`, `checking`, then `ready`, or `found` (missing or drift),
 which a fulfil need of grade auto leaves for `fulfilling` and a check again; `failed`,
-`blocked` and `stopped` end it too. The executor walks each need by itself, `pubdeploy
+`blocked`, `stopped` and `unknown` (the walk could not judge it) end it too. The executor walks each need by itself, `pubdeploy
 walk --unit U --need NAME --budget-seconds S [--fulfil --yes]`, once every need it comes
-after has ended (after one that failed, was blocked or stopped, it is blocked), as many at
+after has ended (after one that failed, was blocked, stopped or left unknown, it is blocked), as many at
 once as the machine's `parallel` (4) allows, one run of a service at a time; a walk past
 its need's budget and 60 s more fails it. A need's modes switch until approval, which
 freezes them, and the plan's key, which the approval binds to, counts them. Stop before
 approval declines; while it walks, what has not started never starts, and a need walking
-stops as its class says: `signal` (terminated), `shorten` (its budget ends now) or
-`continue` (it finishes, noted; only its own cancel, its name typed, ends it). A run ends
-`done`, `failed` or `stopped`, its request in the same state (`stopped` is new to a
+stops as its class says: `signal` (terminated), `shorten` (SIGUSR1: pubdeploy's walk ends
+the step `unknown`, its journal kept) or `continue` (it finishes, noted; only its own cancel, its name typed, ends it). A run ends
+`stopped` when a person stopped it, `failed` when a need failed or was blocked, else
+`done` (noting each need left unknown), its request in the same state (`stopped` is new to a
 caller), and each need's journal goes to the need-states facts. Each move is an event of
 the run's journal, written with the run to storage's head `convergence.runs` (tenant
 `plane`) before it counts; a new pod reads the runs back from it: one awaiting approval

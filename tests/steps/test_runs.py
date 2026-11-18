@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import re
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +33,7 @@ class Proc:
     def __init__(self, spawn: Spawn, need: str, fulfil: bool, outcome):
         self.spawn, self.need, self.fulfil, self.outcome = spawn, need, fulfil, outcome
         self.terminated = False
+        self.budgeted = False
 
     def printed(self, state: str, detail: str = "", need: str | None = None):
         document = journal(states={need or self.need: state})
@@ -44,6 +44,8 @@ class Proc:
     def poll(self, timeout: float):
         if self.terminated:
             return -15, "", "terminated"
+        if self.budgeted:  # pubdeploy's walk on SIGUSR1: the step ends unknown, its journal kept
+            return self.printed("unknown", "its budget ended at the stop")
         kind, *rest = self.outcome
         if kind == "gate":
             return self.printed("ready") if self.spawn.gates[self.need].wait(timeout) else None
@@ -53,8 +55,8 @@ class Proc:
             except threading.BrokenBarrierError:
                 return 1, "", "alone"
             return self.printed("ready")
-        if kind == "hang":
-            time.sleep(timeout)
+        if kind == "hang":  # it never ends by itself: only its deadline or a stop ends it
+            self.spawn.never.wait(timeout)
             return None
         if kind == "garbage":
             return 2, "", "pubdeploy: no\n"
@@ -65,6 +67,9 @@ class Proc:
     def terminate(self) -> None:
         self.terminated = True
 
+    def budget(self) -> None:
+        self.budgeted = True
+
 
 class Spawn:
     def __init__(self) -> None:
@@ -73,6 +78,7 @@ class Spawn:
         self.states: dict[str, str] = {}
         self.gates: dict[str, threading.Event] = {}
         self.barrier = threading.Barrier(2)
+        self.never = threading.Event()
 
     def __call__(self, argv: list[str], cwd: Path, env: dict[str, str]) -> Proc:
         self.calls.append(argv)
@@ -265,14 +271,20 @@ def stops(live: Live) -> None:
     assert answer.status_code == 200, answer.text
 
 
+def _until(live: Live, done) -> None:
+    """Wait, on the runs' own condition (every move notifies it), until `done` holds."""
+    with live.runs.changed:
+        assert live.runs.changed.wait_for(done, timeout=10), {n: x.state for n, x in live.run.needs.items()}
+
+
 @when(parsers.parse("the needs {names} are fulfilling"))
 def are_fulfilling(live: Live, names: str) -> None:
     wanted = re.findall(r'"([^"]+)"', names)
-    for _ in range(500):
-        if all(live.run.needs[n].state == "fulfilling" for n in wanted):
-            return
-        time.sleep(0.01)
-    raise AssertionError({n: live.run.needs[n].state for n in wanted})
+
+    def walking() -> bool:  # fulfilling, and its fulfil's walk begun (spawned under the runs' lock)
+        begun = {c[c.index("--need") + 1] for c in live.spawn.calls if "--fulfil" in c}
+        return all(live.run.needs[n].state == "fulfilling" and n in begun for n in wanted)
+    _until(live, walking)
 
 
 @when(parsers.parse('the fulfil of "{need}" is let go'))
@@ -301,7 +313,7 @@ def _event(live: Live, body, token: str | None = "run"):
 
 @when(parsers.parse('the run\'s executor posts the event "{need}" from "{frm}" to "{to}"'))
 def posts_event(live: Live, need: str, frm: str, to: str) -> None:
-    live.event_body = {"seq": len(live.run.journal) + 1, "need": need, "from": frm, "to": to, "at": "now"}
+    live.event_body = {"seq": live.run.needs[need].seq + 1, "need": need, "from": frm, "to": to, "at": "now"}
     live.answers = [_event(live, live.event_body)]
 
 
@@ -384,10 +396,7 @@ def hours_pass(live: Live) -> None:
 # --- What came of it
 
 def _settle(live: Live, need: str | None = None) -> None:
-    for _ in range(500):
-        if (need and live.run.needs[need].ended) or (not need and live.run.ended):
-            return
-        time.sleep(0.01)
+    _until(live, lambda: live.run.needs[need].ended if need else live.run.ended)
 
 
 def _ended(live: Live) -> None:
@@ -519,8 +528,21 @@ def same_event(live: Live) -> None:
 
 @then(parsers.parse('an event from "{frm}" to "{to}" now is refused with {status:d}'))
 def event_refused(live: Live, frm: str, to: str, status: int) -> None:
-    body = {"seq": len(live.run.journal) + 1, "need": "k8s.secret:a", "from": frm, "to": to, "at": "now"}
+    body = {"seq": live.run.needs["k8s.secret:a"].seq + 1, "need": "k8s.secret:a", "from": frm, "to": to, "at": "now"}
     assert _event(live, body).status_code == status
+
+
+@then(parsers.parse("an event out of its need's order is refused with {status:d}"))
+def event_out_of_order(live: Live, status: int) -> None:
+    need = live.run.needs["k8s.secret:a"]
+    body = {"seq": need.seq + 2, "need": need.name, "from": need.state, "to": "ready", "at": "now"}
+    assert _event(live, body).status_code == status
+
+
+@then("the event carries the need's own sequence number")
+def need_seq(live: Live) -> None:
+    event = live.answers[0].json()
+    assert event["need_seq"] == 1 and event["seq"] > 1
 
 
 @then(parsers.parse("an event without the run's token is refused with {status:d}"))
@@ -677,3 +699,22 @@ def stop_idle(live: Live) -> None:
 def stop_refused(live: Live, status: int, monkeypatch) -> None:
     monkeypatch.setattr(live.world.approvals, "decide", lambda *a: "that request is not awaiting a decision")
     assert live.world.client.post(f"/runs/{live.run.id}/stop", headers=person()).status_code == status
+
+
+@then("a new pod reads the ended run back as it was, each need fulfilled")
+def read_back(live: Live) -> None:
+    w = live.world
+    w.approvals = w.new_approvals()
+    again = live.runs_for(w.storage)
+    w.approvals.start()
+    again.start()
+    run = again.runs[live.run.id]
+    assert run.state == "done" and {n: (x.state, x.fulfilled, x.seq) for n, x in run.needs.items()} == \
+        {n: (x.state, True, x.seq) for n, x in live.run.needs.items()}
+
+
+@then(parsers.parse('a walk asked of "{need}" once the run is stopping never starts'))
+def never_starts(live: Live, need: str) -> None:
+    calls = len(live.spawn.calls)
+    walked = live.runs.executor._walk(live.run, live.run.needs[need], False)  # noqa: SLF001 - the race, made certain
+    assert walked == ("stopped", "stopped before its walk began") and len(live.spawn.calls) == calls

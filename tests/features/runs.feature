@@ -22,6 +22,7 @@ Feature: Live runs, need by need
     Then the run ends "done" with "k8s.secret:a" ready, "k8s.secret:b" ready
     And each need was walked to check, then to fulfil as the person
     And the request ended "done"
+    And a new pod reads the ended run back as it was, each need fulfilled
 
   Scenario: A need waits for the need it comes after
     Given the live needs "k8s.secret:a" missing, "k8s.secret:b" missing after "k8s.secret:a"
@@ -56,11 +57,12 @@ Feature: Live runs, need by need
     And the needs "k8s.secret:s", "k8s.secret:h", "pg.database:c" are fulfilling
     And the person stops the run
     Then "k8s.secret:s" is "stopped", saying "stopped (signal)"
-    And "k8s.secret:h" is "stopped", saying "stopped (shorten)"
+    And "k8s.secret:h" is "unknown", saying "its budget ended at the stop"
     And "pg.database:c" is still "fulfilling", and the journal says "keeps running: it migrates the database"
     When the fulfil of "pg.database:c" is let go
     Then the run ends "stopped" with "pg.database:c" ready, "k8s.secret:w" stopped
     And the request ended "stopped"
+    And a walk asked of "k8s.secret:s" once the run is stopping never starts
 
   Scenario: A need that must finish is cancelled only by its name, typed
     Given the live needs "k8s.secret:s" missing stop signal, "pg.database:c" missing stop continue
@@ -95,7 +97,9 @@ Feature: Live runs, need by need
     And the run's executor posts the event "k8s.secret:a" from "waiting" to "checking"
     And the run's executor posts the same event again
     Then both answers are the same event, and the journal holds it once
+    And the event carries the need's own sequence number
     And an event from "waiting" to "checking" now is refused with 409
+    And an event out of its need's order is refused with 409
     And an event without the run's token is refused with 403
     And an event that names no need is refused with 400
 
@@ -150,9 +154,24 @@ Feature: Live runs, need by need
       | wrong                                              | said                                   |
       | the check of "k8s.secret:a" prints no journal      | the walk printed no journal            |
       | the check of "k8s.secret:a" names another need      | the walk's journal does not name the need |
-      | the check of "k8s.secret:a" finds it unknown        | unknown:                               |
       | the fulfil of "k8s.secret:a" runs past its budget   | ran past its budget                     |
       | the walk of "k8s.secret:a" cannot be made           | its walk could not run (RuntimeError)   |
+
+  Scenario: A need the walk cannot judge ends unknown, and the needs after it are blocked
+    Given the live needs "k8s.secret:a" missing, "k8s.secret:b" missing after "k8s.secret:a"
+    And the check of "k8s.secret:a" finds it unknown
+    When a GitHub run asks for a live fulfil
+    And the person approves the run
+    Then the run ends "failed" with "k8s.secret:a" unknown, "k8s.secret:b" blocked
+    And the request ended "failed", saying "not ready: k8s.secret:b blocked"
+
+  Scenario: A run whose only needs not ready are unknown ends done, noting them
+    Given the live needs "k8s.secret:a" missing, "k8s.secret:b" missing
+    And the check of "k8s.secret:a" finds it unknown
+    When a GitHub run asks for a live fulfil
+    And the person approves the run
+    Then the run ends "done" with "k8s.secret:a" unknown, "k8s.secret:b" ready
+    And the request ended "done", saying "not judged: k8s.secret:a unknown"
 
   Scenario: A run whose service is being walked ends with its needs blocked
     Given the live needs "k8s.secret:a" missing

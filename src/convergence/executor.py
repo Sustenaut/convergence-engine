@@ -14,13 +14,15 @@ executor's would through POST /runs/ID/events. One run of a service at a time: t
 executor holds the service's walk lock (a round's too) for the run.
 
 Stop, while a run walks: what has not started never starts (stopped), and a need walking
-stops as its class says: signal terminates its walk at once; shorten ends its budget
-now, which the walk's own wait then ends the same way (its own deadline, not a signal);
-continue lets it finish (runs.stop notes it), unless a person cancels it by name.
+stops as its class says: signal terminates its walk at once; shorten sends it SIGUSR1,
+which pubdeploy's walk takes as "its budget is what has elapsed": the step ends unknown,
+its journal kept; continue lets it finish (runs.stop notes it), unless a person cancels
+it by name. A need left unknown ends there, and the needs after it are blocked.
 """
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import threading
 import time
@@ -42,6 +44,9 @@ class Proc(Protocol):
 
     def terminate(self) -> None: ...
 
+    def budget(self) -> None:
+        """Its budget ends now (SIGUSR1): pubdeploy's walk ends the step unknown, keeping its journal."""
+
 
 class Popen:  # pragma: no cover - the pod's: a real process; the suite's executor gets fakes
     """A walk's process: its exit code and output once it ends."""
@@ -60,12 +65,15 @@ class Popen:  # pragma: no cover - the pod's: a real process; the suite's execut
     def terminate(self) -> None:
         self.process.terminate()
 
+    def budget(self) -> None:
+        self.process.send_signal(signal.SIGUSR1)
+
 
 @dataclass
 class Walking:
     proc: Proc
     deadline: float
-    ended_by: str = ""  # stop, shorten or cancel: why it was ended early
+    ended_by: str = ""  # a stop's signal or a cancel: why it was ended early
 
 
 class Executor:
@@ -119,7 +127,7 @@ class Executor:
                         self.runs.transition(run, need.name, "stopped", f"stopped by {run.stopping} before it started")
                         continue
                     before = [run.needs[a] for a in need.after if a in run.needs]
-                    if any(b.state in ("failed", "blocked", "stopped") for b in before):
+                    if any(b.state in ("failed", "blocked", "stopped", "unknown") for b in before):
                         self.runs.transition(run, need.name, "blocked", "a need it comes after did not end ready")
                     elif all(b.ended for b in before) and len(active) < run.parallel:
                         active.add(need.name)
@@ -154,7 +162,13 @@ class Executor:
         argv, cwd, env = self.engine.need_command(run.repository, run.unit, need.name, fulfil, need.seconds,
                                                   run.approver or "engine")
         key = (run.id, need.name)
-        self.walking[key] = walking = Walking(self.spawn(argv, cwd, env), self.clock() + need.seconds + self.grace)
+        # Under the runs' lock, which a stop holds too: a stop either finds this walk, or this
+        # walk finds the stop, and a need to stop never starts walking.
+        with self.runs.lock:
+            if run.stopping and need.stop != "continue":
+                return "stopped", "stopped before its walk began"
+            self.walking[key] = walking = Walking(self.spawn(argv, cwd, env), self.clock() + need.seconds + self.grace)
+            self.runs.changed.notify_all()  # a walk has begun: whoever waits on the run looks again
         try:
             while True:
                 ended = walking.proc.poll(self.slice)
@@ -162,8 +176,6 @@ class Executor:
                     break
                 if self.clock() >= walking.deadline:
                     walking.proc.terminate()
-                    if walking.ended_by:
-                        return "stopped", f"{walking.ended_by}: its budget ended at the stop"
                     return "failed", f"it ran past its budget of {need.seconds:g} s and {self.grace:g} s more"
         finally:
             del self.walking[key]
@@ -181,11 +193,12 @@ class Executor:
             return "failed", "the walk's journal does not name the need"
         state = found[0].get("state")
         detail = detail_of(found[0])
-        return {"ready": "ready", "missing": "found", "drift": "found", "blocked": "blocked"}.get(
-            state, "failed"), (detail if state in ("ready", "missing", "drift", "blocked") else f"{state}: {detail}")
+        known = {"ready": "ready", "missing": "found", "drift": "found", "blocked": "blocked", "unknown": "unknown"}
+        return known.get(state, "failed"), (detail if state in known else f"{state}: {detail}")
 
     def stop(self, run: Run, need: Need, cancel: bool = False) -> None:
-        """End a need's walk as its stop class says: signal (or a cancel) at once, shorten at its budget's end now."""
+        """End a need's walk as its stop class says: signal (or a cancel) terminates it; shorten tells
+        it its budget has ended (SIGUSR1), and the walk ends the step unknown, its journal kept."""
         walking = self.walking.get((run.id, need.name))
         if walking is None:
             return
@@ -193,5 +206,4 @@ class Executor:
             walking.ended_by = "cancelled" if cancel else "stopped (signal)"
             walking.proc.terminate()
         else:
-            walking.ended_by = "stopped (shorten)"
-            walking.deadline = self.clock()
+            walking.proc.budget()
