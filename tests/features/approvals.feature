@@ -381,3 +381,18 @@ Feature: Requests a person approves first
     And the request's plan has been walked
     Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "Secret old-key is in the cluster, and nothing reads or declares it"
     And the run's poll gives "k8s.namespace:notifier" as type "k8s.namespace", grade "auto", state "ready", found "k8s.namespace:notifier is ready"
+
+  Scenario: What the walk found may change between the plan and the run, and the approval still runs
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" missing graded auto detailing "took 4.1 s, over its budget"
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    And the walk now finds "k8s.secret:s" missing detailing "took 6.3 s, over its budget"
+    And the person approves it and the walk makes it ready
+    Then the request ends "done" with "k8s.secret:s" ready
+
+  Scenario: What the poll answer carries holds no email and no link
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "ask someone@example.org, see https://example.org/x?token=1"
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "ask [someone], see [link]"
+    And the request's page says "someone@example.org"

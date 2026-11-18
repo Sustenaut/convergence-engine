@@ -803,3 +803,9 @@ def poll_gives_need(world: World, need: str, kind: str, grade: str, state: str, 
     _poll(world, world.token())
     found = {n["need"]: n for n in world.answer.json()["result"]["needs"]}
     assert found[need] == {"need": need, "type": kind, "grade": grade, "state": state, "detail": detail}
+
+
+@given(parsers.parse('the walk now finds "{need}" {state} detailing "{detail}"'))
+@when(parsers.parse('the walk now finds "{need}" {state} detailing "{detail}"'))
+def walk_now_finds(world: World, need: str, state: str, detail: str) -> None:
+    world.runner.walk_prints(REPOSITORY, journal(states={need: state}, details={need: [detail]}), code=1)

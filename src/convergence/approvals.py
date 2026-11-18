@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import threading
 import time
@@ -98,6 +99,22 @@ class Ledger:
         except Exception as e:  # noqa: BLE001 - any refusal: the change is refused with it
             raise JournalRefused(type(e).__name__) from None
         self.last = stored["id"]
+
+
+def plan_key(plan: list[dict[str, str]]) -> str:
+    """A fulfil plan's sha256, which its approval binds to: each need's name, state and grade
+    alone. What the walk found and what the fulfil changes (its details: how long a check took,
+    a tool's last line) differ from walk to walk, so they are shown, never hashed."""
+    return plan_sha256([{"need": n["need"], "state": n["state"], "grade": n["grade"]} for n in plan])
+
+
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+LINK = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+
+
+def public(text: Any) -> str:
+    """Text a caller is told, which a public Actions log may print: no email, no link."""
+    return LINK.sub("[link]", EMAIL.sub("[someone]", str(text or "")))
 
 
 def plan_sha256(plan: Any) -> str:
@@ -372,21 +389,21 @@ class Approvals:
         plan = plan_of(journal)
         if ask.kind == "check":  # read-only: each need's state, and nobody is asked anything
             left = ", ".join(f"{n['need']} {n['state']}" for n in plan)
-            self._end(ask, "done", "engine", plan=plan, plan_sha256=plan_sha256(plan), needs=needs_of(journal),
+            self._end(ask, "done", "engine", plan=plan, plan_sha256=plan_key(plan), needs=needs_of(journal),
                       note=f"read-only check; not ready: {left}"[:1000] if plan else "read-only check; every need is ready")
             return
         if not plan:
-            self._end(ask, "done", "engine", plan=[], plan_sha256=plan_sha256([]), needs=needs_of(journal))
+            self._end(ask, "done", "engine", plan=[], plan_sha256=plan_key([]), needs=needs_of(journal))
             return
         ended = nothing_to_fulfil(plan)
         if ended is not None:  # nothing to approve: the fulfil would change nothing
             state, why = ended
             left = needs_of(journal)
-            self._end(ask, state, "engine", plan=plan, plan_sha256=plan_sha256(plan), needs=left,
+            self._end(ask, state, "engine", plan=plan, plan_sha256=plan_key(plan), needs=left,
                       **({"error": why} if state == "failed" else {"note": why}))
             return
         try:
-            self._move(ask, "awaiting", "engine", plan=plan, plan_sha256=plan_sha256(plan))
+            self._move(ask, "awaiting", "engine", plan=plan, plan_sha256=plan_key(plan))
         except JournalRefused as e:
             self._end(ask, "failed", "engine", error=f"the journal refused its plan ({e})")
             return
@@ -409,7 +426,7 @@ class Approvals:
                 return
             try:
                 now = self._walked(ask, ask.approver)
-                if isinstance(now, str) or plan_sha256(now) != ask.plan_sha256:
+                if isinstance(now, str) or plan_key(now) != ask.plan_sha256:
                     self._end(ask, "failed", "engine", error=CHANGED if not isinstance(now, str) else now)
                     return
                 result = self.engine.fulfil_walk(ask.repository, ask.unit, ask.approver)
@@ -479,9 +496,11 @@ class Approvals:
         and an email stays on the page and in the journal."""
         return {"id": ask.id, "kind": ask.kind, "state": ask.state, "repository": ask.repository, "unit": ask.unit,
                 "plan_sha256": ask.plan_sha256, "url": f"{site}/approvals/{ask.id}",
-                # The plan's needs by name, state and what the fulfil changes (names only), so a
-                # caller can say what awaits approval; a gate's plan text stays on the page.
-                "plan": [{"need": n["need"], "state": n["state"], "change": n["change"]} for n in ask.plan or []],
-                "expires_at": _iso(ask.expires_at),
-                "result": {"needs": ask.needs, "error": ask.error, "note": ask.note}}
+                # The plan's needs by name, state and what the fulfil changes, so a caller can say
+                # what awaits approval; a gate's plan text stays on the page. What may leave the
+                # engine for a public log has no email and no link (public()).
+                "plan": [{"need": n["need"], "state": n["state"], "change": public(n["change"])}
+                         for n in ask.plan or []],
+                "result": {"needs": [{**n, "detail": public(n.get("detail", ""))} for n in ask.needs],
+                           "error": public(ask.error), "note": public(ask.note)}}
 
