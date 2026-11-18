@@ -374,3 +374,10 @@ Feature: Requests a person approves first
   Scenario: A check of another repository is refused, as a fulfil is
     When a GitHub run posts a check of another repository
     Then the answer is 403 refusing "other-repository"
+
+  Scenario: A check's answer gives every need's type, grade, state and what was found
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "Secret old-key is in the cluster, and nothing reads or declares it", "k8s.namespace:notifier" ready graded auto
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "Secret old-key is in the cluster, and nothing reads or declares it"
+    And the run's poll gives "k8s.namespace:notifier" as type "k8s.namespace", grade "auto", state "ready", found "k8s.namespace:notifier is ready"

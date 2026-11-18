@@ -147,8 +147,18 @@ def plan_of(document: dict[str, Any]) -> list[dict[str, str]]:
             for n in document["needs"] if n["state"] != "ready"]
 
 
+def detail_of(need: dict[str, Any]) -> str:
+    """What the walk found of a need, in one line: its details (pubdeploy's, names only), else
+    its summary."""
+    found = [str(d) for d in (need.get("details") or [])[:3] if str(d).strip()]
+    return " ".join(("; ".join(found) or str(need.get("summary") or "")).split())[:400]
+
+
 def needs_of(document: dict[str, Any]) -> list[dict[str, str]]:
-    return [{"need": str(n["id"]), "state": str(n["state"])} for n in document["needs"]]
+    """Every need of a unit's journal, as a caller is told it at the end: name, type, grade,
+    state and what was found. Names and states only, never a value."""
+    return [{"need": str(n["id"]), "type": str(n["type"]), "grade": str(n["grade"]), "state": str(n["state"]),
+             "detail": detail_of(n)} for n in document["needs"]]
 
 
 @dataclass
@@ -366,12 +376,12 @@ class Approvals:
                       note=f"read-only check; not ready: {left}"[:1000] if plan else "read-only check; every need is ready")
             return
         if not plan:
-            self._end(ask, "done", "engine", plan=[], plan_sha256=plan_sha256([]), needs=[])
+            self._end(ask, "done", "engine", plan=[], plan_sha256=plan_sha256([]), needs=needs_of(journal))
             return
         ended = nothing_to_fulfil(plan)
         if ended is not None:  # nothing to approve: the fulfil would change nothing
             state, why = ended
-            left = [{"need": n["need"], "state": n["state"]} for n in plan]
+            left = needs_of(journal)
             self._end(ask, state, "engine", plan=plan, plan_sha256=plan_sha256(plan), needs=left,
                       **({"error": why} if state == "failed" else {"note": why}))
             return

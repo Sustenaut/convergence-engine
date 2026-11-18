@@ -487,7 +487,7 @@ def events_named(world: World) -> None:
     events = world.storage.events()
     assert {e["id"] for e in events} == {world.ask.id}
     assert all(e["plan_sha256"] == world.ask.plan_sha256 for e in events[1:])
-    assert events[-1]["needs"] == [{"need": "k8s.secret:s", "state": "ready"}]
+    assert events[-1]["needs"] == [{"need": "k8s.secret:s", "type": "k8s.secret", "grade": "auto", "state": "ready", "detail": "k8s.secret:s is ready"}]
     assert [e["by"] for e in events] == [REPOSITORY, "engine", WHO, WHO, "engine"]
     text = json.dumps(events)
     for value in ("ghs_write", "ghs_read", "storage-token", "bws-write", world.bearer):
@@ -593,7 +593,7 @@ def gate_still(world: World, state: str) -> None:
 @then(parsers.parse('the approved fulfil runs, and the planning one ended "{state}"'))
 def resumed(world: World, state: str) -> None:
     fulfil, third = world.approvals.asks[world.fulfil.id], world.approvals.asks["third"]
-    assert fulfil.state == "done" and fulfil.needs == [{"need": "k8s.secret:s", "state": "ready"}]
+    assert fulfil.state == "done" and fulfil.needs == [{"need": "k8s.secret:s", "type": "k8s.secret", "grade": "auto", "state": "ready", "detail": "k8s.secret:s is ready"}]
     assert third.state == state and "restarted" in third.error
 
 
@@ -796,3 +796,10 @@ def poll_plan(world: World, need: str, state: str) -> None:
     _poll(world, world.token())
     (entry,) = world.answer.json()["plan"]
     assert (entry["need"], entry["state"]) == (need, state) and entry["change"].startswith("the fulfil makes it")
+
+
+@then(parsers.parse('the run\'s poll gives "{need}" as type "{kind}", grade "{grade}", state "{state}", found "{detail}"'))
+def poll_gives_need(world: World, need: str, kind: str, grade: str, state: str, detail: str) -> None:
+    _poll(world, world.token())
+    found = {n["need"]: n for n in world.answer.json()["result"]["needs"]}
+    assert found[need] == {"need": need, "type": kind, "grade": grade, "state": state, "detail": detail}

@@ -169,7 +169,7 @@ def plan_then_fulfil(world: World, tmp_path: Path) -> None:
     plan_envs = [env for argv, _, env in world.runner.calls if "check" in argv and "--unit" in argv]
     assert all(e["GH_TOKEN"] == "ghs_read" and "PUBSEC_WRITE_TOKEN_FILE" not in e for e in plan_envs)
     assert f"convergence: {REPOSITORY} notifier: fulfil approved by {WHO}" in world.lines
-    assert world.ask.approver == WHO and world.ask.needs == [{"need": "k8s.secret:s", "state": "ready"}]
+    assert world.ask.approver == WHO and world.ask.needs == [{"need": "k8s.secret:s", "type": "k8s.secret", "grade": "auto", "state": "ready", "detail": "k8s.secret:s is ready"}]
 
 
 @then("the service page shows the need ready")
