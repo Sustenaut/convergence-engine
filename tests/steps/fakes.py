@@ -13,12 +13,13 @@ HASH = "a" * 64
 
 
 def journal(repository: str = "Sustenaut/notifier", unit: str = "notifier", states: dict[str, str] | None = None,
-            grades: dict[str, str] | None = None, fixes: dict[str, str] | None = None) -> dict[str, Any]:
+            grades: dict[str, str] | None = None, fixes: dict[str, str] | None = None,
+            details: dict[str, list[str]] | None = None) -> dict[str, Any]:
     states = states if states is not None else {"k8s.namespace:notifier": "ready"}
-    grades, fixes = grades or {}, fixes or {}
+    grades, fixes, details = grades or {}, fixes or {}, details or {}
     needs = [{"id": i, "type": i.split(":")[0], "name": i.split(":", 1)[-1], "implied_by": None, "after": [],
               "grade": grades.get(i, "auto"), "state": s, "fulfilled": False, "summary": f"{i} is {s}",
-              "fix": fixes.get(i, ""), "details": {}, "seconds": 0.1,
+              "fix": fixes.get(i, ""), "details": details.get(i, []), "seconds": 0.1,
               "checked_at": "2026-11-10T06:00:01Z" if s != "unknown" else ""} for i, s in states.items()]
     counts = {s: sum(v == s for v in states.values()) for s in ("ready", "missing", "drift", "blocked", "unknown")}
     return {"schema": "deploy-journal/2",

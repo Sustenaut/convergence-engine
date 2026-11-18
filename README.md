@@ -104,7 +104,12 @@ arrival: each need that is not ready, by name, type, state and grade, and what i
 fulfil changes, names only. The approval is bound to the plan's sha256: the unit is
 walked read-only again just before the Fulfil, and if that plan differs the request
 ends `failed`, "plan changed since approval". A unit with nothing to do is `done` at
-once, with no approval. A gate's plan is the caller's text, 8 KB at most.
+once, with no approval, and so is one whose plan holds nothing the fulfil changes (no
+auto need missing or drifted): it ends `failed`, "nothing the engine can fulfil; needs a
+person: …" with each need and what was found (a need missing, drifted or blocked that
+only a person mends), or `done` with that list as its note when the rest is only what the
+engine cannot judge from where it walks (an admin channel's check, and the gate after it).
+Nobody is asked to approve a plan the fulfil would change nothing of. A gate's plan is the caller's text, 8 KB at most.
 
 Who may ask (`callers.py`), with `Authorization: Bearer`:
 

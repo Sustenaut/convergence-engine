@@ -120,10 +120,16 @@ def _todo(need: dict[str, Any], unit: str) -> str:
     return fix
 
 
+def _found(need: dict[str, Any]) -> str:
+    """What the walk found: its summary, then each detail it named (names, never a value)."""
+    details = [escape(str(d)) for d in need.get("details") or [] if str(d).strip()]
+    return escape(need.get("summary") or "") + "".join(f"<br><span class=why>{d}</span>" for d in details[:10])
+
+
 def _needs(document: dict[str, Any]) -> str:
     unit = document["service"]["unit"]
     rows = [[f"<code>{escape(n['id'])}</code>", escape(n["type"]), escape(n["grade"]), _state(n["state"]),
-             escape(n.get("checked_at") or ""), escape(n.get("summary") or ""), _todo(n, unit)]
+             escape(n.get("checked_at") or ""), _found(n), _todo(n, unit)]
             for n in document["needs"]]
     walk = document["walk"]
     said = (f"<p>Walked {escape(walk['started_at'])} from {escape(walk['from'])} by {escape(walk['by'] or 'unknown')}, "
@@ -383,6 +389,8 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
                      f" <span class=why>as {escape(actor)}</span></div>")
         if ask.error:
             body += f"<p class=missing>It did not finish: {escape(ask.error)}</p>"
+        if ask.note:
+            body += f"<p class=why>{escape(ask.note)}</p>"
         body += "<h2>Changes</h2>" + _table(["State", "When", "By"], [
             [_request_state(c["state"]), escape(c["at"]), escape(c["by"])] for c in ask.changes], "None yet.")
         if ask.kind == "fulfil" and (ask.said or ask.needs):

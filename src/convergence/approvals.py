@@ -107,7 +107,34 @@ def _line(need: dict[str, Any]) -> str:
         said = "makes it" if need["state"] == "missing" else "makes it again"
         return f"the fulfil {said}: {need.get('summary') or need['id']}".splitlines()[0][:200]
     fix = (need.get("fix") or "").strip().splitlines()
-    return ("not the fulfil's: " + (fix[0] if fix else need.get("summary") or "a person's step"))[:200]
+    # What the walk found, by name (pubdeploy's details name Secrets, objects and keys, never a
+    # value), then what a person does about it.
+    found = [str(d) for d in (need.get("details") or [])[:3] if str(d).strip()]
+    said = "; ".join([*found, fix[0] if fix else need.get("summary") or "a person's step"])
+    return (NOT_FULFILS + " ".join(said.split()))[:400]
+
+
+NOT_FULFILS = "not the fulfil's: "
+
+
+def fulfillable(need: dict[str, Any]) -> bool:
+    """Whether the fulfil changes the need: an auto need that is missing or drifted."""
+    return need.get("grade") == "auto" and need.get("state") in ("missing", "drift")
+
+
+def nothing_to_fulfil(plan: list[dict[str, str]]) -> tuple[str, str] | None:
+    """For a plan the fulfil changes nothing of: how the request ends, and why. A need a
+    person must make or mend (missing, drift or blocked, and not the fulfil's) ends it
+    failed; needs the engine only cannot judge from where it walks (unknown, such as an
+    admin channel's check, and the gate that follows them) end it done, noted. None when
+    the fulfil has something to do."""
+    if any(fulfillable(n) for n in plan):
+        return None
+    person = [n for n in plan if n["state"] in ("missing", "drift", "blocked")]
+    listed = "; ".join(f"{n['need']} ({n['change'].removeprefix(NOT_FULFILS)})" for n in (person or plan))
+    if person:
+        return "failed", f"nothing the engine can fulfil; needs a person: {listed}"[:1000]
+    return "done", f"nothing the engine can fulfil; unknown from where the engine walks: {listed}"[:1000]
 
 
 def plan_of(document: dict[str, Any]) -> list[dict[str, str]]:
@@ -138,6 +165,7 @@ class Ask:
     changes: list[dict[str, str]] = field(default_factory=list)  # each state, when and by whom
     approver: str = ""
     error: str = ""
+    note: str = ""  # a request done without the fulfil: what it could not judge
     said: list[str] = field(default_factory=list)  # the Fulfil's lines, as pubdeploy prints them
     needs: list[dict[str, str]] = field(default_factory=list)  # each need's state at the end
     documents: list[dict[str, Any]] = field(default_factory=list)  # the Fulfil's journals (in memory)
@@ -157,7 +185,7 @@ class Ask:
                 "repository": self.repository, "unit": self.unit, "created_at": self.created_at,
                 "expires_at": self.expires_at, "state": self.state, "plan": self.plan, "text": self.text,
                 "plan_sha256": self.plan_sha256, "changes": self.changes, "approver": self.approver,
-                "error": self.error, "said": self.said[-60:], "needs": self.needs}
+                "error": self.error, "note": self.note, "said": self.said[-60:], "needs": self.needs}
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> Ask:
@@ -192,6 +220,7 @@ class Approvals:
                 "by": last["by"], "repository": ask.repository, "unit": ask.unit,
                 "requester": ask.requester.record(), "sha": ask.requester.sha, "run_url": ask.run_url,
                 "plan_sha256": ask.plan_sha256, "needs": ask.needs if ask.ended else [],
+                "reason": (ask.error or ask.note) if ask.ended else "",
                 "open": [a.record() for a in self.asks.values() if not a.ended],
                 "ended": [a.record() for a in ended]}
 
@@ -325,6 +354,13 @@ class Approvals:
         if not plan:
             self._end(ask, "done", "engine", plan=[], plan_sha256=plan_sha256([]), needs=[])
             return
+        ended = nothing_to_fulfil(plan)
+        if ended is not None:  # nothing to approve: the fulfil would change nothing
+            state, why = ended
+            left = [{"need": n["need"], "state": n["state"]} for n in plan]
+            self._end(ask, state, "engine", plan=plan, plan_sha256=plan_sha256(plan), needs=left,
+                      **({"error": why} if state == "failed" else {"note": why}))
+            return
         try:
             self._move(ask, "awaiting", "engine", plan=plan, plan_sha256=plan_sha256(plan))
         except JournalRefused as e:
@@ -420,5 +456,5 @@ class Approvals:
         return {"id": ask.id, "kind": ask.kind, "state": ask.state, "repository": ask.repository, "unit": ask.unit,
                 "plan_sha256": ask.plan_sha256, "url": f"{site}/approvals/{ask.id}",
                 "expires_at": _iso(ask.expires_at),
-                "result": {"needs": ask.needs, "error": ask.error}}
+                "result": {"needs": ask.needs, "error": ask.error, "note": ask.note}}
 

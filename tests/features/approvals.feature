@@ -320,3 +320,31 @@ Feature: Requests a person approves first
       | moment                                                  | why                                         |
       | the person opens the request's page while its plan is walked | The plan is being walked                |
       | the plan has been walked and the person declined it     | This request is declined: it no longer awaits a decision |
+
+  Scenario: A plan with only what a person must mend ends failed at once, asking no one
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "Secret old-key is in the cluster, and nothing reads or declares it", "github.gate:notifier" unknown graded auto
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "failed", saying "nothing the engine can fulfil; needs a person: k8s.secrets-declared:notifier (Secret old-key is in the cluster, and nothing reads or declares it"
+    And the service page shows "Secret old-key is in the cluster, and nothing reads or declares it" beside the need
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the journal holds 2 events, "planning", "failed"
+    And the journal's last event gives the reason and the needs "k8s.secrets-declared:notifier", "github.gate:notifier"
+    And the run's poll says "failed", giving the reason "nothing the engine can fulfil; needs a person"
+
+  Scenario: A plan with only what the engine cannot judge from where it walks ends done, noted
+    Given the engine has walked Sustenaut/notifier and found "k8s.manifests:k8s/admin/network-policy.yaml" unknown graded auto, "github.gate:notifier" unknown graded auto
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "nothing the engine can fulfil; unknown from where the engine walks: k8s.manifests:k8s/admin/network-policy.yaml"
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the run's poll says "done", giving the note "unknown from where the engine walks"
+    And the request's page says "unknown from where the engine walks"
+
+  Scenario: A plan with something the fulfil changes still awaits a person, whatever else it holds
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" missing graded auto, "k8s.secrets-declared:notifier" drift graded none
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request is "awaiting"

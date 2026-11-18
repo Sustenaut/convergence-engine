@@ -29,7 +29,7 @@ def _states(found: str) -> dict[str, str]:
     return dict(re.findall(r'"([^"]+)" (\w+)', found))
 
 
-@given(parsers.parse("the engine has walked Sustenaut/notifier and found {found}"), target_fixture="world")
+@given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?!.* graded )(?P<found>.+)"), target_fixture="world")
 def walked(tmp_path: Path, found: str) -> World:
     w = World(tmp_path, needs=_states(found))
     w.engine.round()
@@ -730,3 +730,47 @@ def press_approval_refused(world: World) -> None:
 def awaits_with_buttons(world: World) -> None:
     assert world.ask.state == "awaiting" and "Approve</button>" in _page(world).text
     assert any("its press's approval did not count" in line for line in world.lines)
+
+
+@given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?P<found>.+ graded .+)"),
+       target_fixture="world")
+def walked_graded(tmp_path: Path, found: str) -> World:
+    parts = re.findall(r'"([^"]+)" (\w+) graded (\w+)(?: detailing "([^"]+)")?', found)
+    w = World(tmp_path, needs={n: s for n, s, _, _ in parts})
+    w.runner.walk_prints(REPOSITORY, journal(states={n: s for n, s, _, _ in parts}, grades={n: g for n, _, g, _ in parts},
+                                             details={n: [d] for n, _, _, d in parts if d}), code=1)
+    w.engine.round()
+    w.held = False
+    w.bearer = ""
+    return w
+
+
+@then("the request never awaited an approval")
+def never_awaited(world: World) -> None:
+    assert "awaiting" not in [c["state"] for c in world.ask.changes]
+
+
+@then(parsers.parse('the journal\'s last event gives the reason and the needs {names}'))
+def last_event_needs(world: World, names: str) -> None:
+    last = world.storage.events()[-1]
+    assert last["reason"] == world.ask.error
+    assert [n["need"] for n in last["needs"]] == re.findall(r'"([^"]+)"', names)
+
+
+@then(parsers.re(r'the run\'s poll says "(?P<state>[^"]+)", giving the (?P<what>reason|note) "(?P<text>[^"]+)"'))
+def poll_with(world: World, state: str, what: str, text: str) -> None:
+    _poll(world, world.token())
+    result = world.answer.json()
+    assert result["state"] == state
+    assert text in result["result"]["error" if what == "reason" else "note"]
+
+
+@then(parsers.parse('the request ends "{state}" with the note "{text}"'))
+def ends_noted(world: World, state: str, text: str) -> None:
+    assert world.ask.state == state and text in world.ask.note, (world.ask.state, world.ask.note)
+
+
+@then(parsers.parse('the service page shows "{text}" beside the need'))
+def service_page_shows(world: World, text: str) -> None:
+    page = world.client.get(f"/services/{REPOSITORY}", headers=person()).text
+    assert f"<br><span class=why>{text}</span>" in page
