@@ -47,11 +47,11 @@ from .approvals import Ask, JournalRefused, Ledger, nothing_to_fulfil, plan_of, 
 
 HEAD = "convergence.runs"
 SCHEMA = "convergence-run/1"
-FINAL = ("ready", "failed", "blocked", "stopped")
+FINAL = ("ready", "failed", "blocked", "stopped", "unknown")  # unknown: the walk could not judge it
 STATES = ("waiting", "checking", "found", "fulfilling", *FINAL)
 # Each need state's moves; `found` ends a need unless it is fulfilled.
 MOVES = {"waiting": ("checking", "blocked", "stopped"),
-         "checking": ("ready", "found", "failed", "blocked", "stopped"),
+         "checking": ("ready", "found", "failed", "blocked", "stopped", "unknown"),
          "found": ("fulfilling",),
          "fulfilling": ("checking", "failed", "stopped")}
 ENDED = ("done", "failed", "declined", "expired", "stopped")
@@ -75,6 +75,7 @@ class Need:
     since: str = ""
     result: str = ""
     fulfilled: bool = False  # a fulfil has run: a check after it that finds it again fails it
+    seq: int = 0  # the need's own events, numbered: an executor's event is the next of them
 
     @property
     def ended(self) -> bool:
@@ -169,13 +170,14 @@ def needs_of_machine(machine: dict[str, Any], modes: dict[str, str]) -> dict[str
 def replay(run: Run) -> None:
     """Each need where its journal leaves it: every need starts waiting, and each event moves one."""
     for need in run.needs.values():
-        need.state, need.since, need.result, need.fulfilled = "waiting", "", "", False
+        need.state, need.since, need.result, need.fulfilled, need.seq = "waiting", "", "", False, 0
     for event in run.journal:
         need = run.needs.get(event.get("need") or "")
         if need is not None and event["to"] in STATES:  # a mode switch or a note moves nothing
             if need.state == "fulfilling" and event["to"] == "checking":
                 need.fulfilled = True
             need.state, need.since, need.result = event["to"], event["at"], event.get("result") or ""
+            need.seq = int(event.get("need_seq") or need.seq)
 
 
 def run_key(plan: list[dict[str, str]], needs: dict[str, Need]) -> str:
@@ -335,7 +337,9 @@ class Runs:
         if need.state == "fulfilling" and to == "checking":
             need.fulfilled = True
         frm, need.state, need.since, need.result = need.state, to, _iso(self.clock()), result
-        return self._note(run, {"need": need.name, "from": frm, "to": to, "by": by, "result": result})
+        need.seq += 1
+        return self._note(run, {"need": need.name, "need_seq": need.seq, "from": frm, "to": to, "by": by,
+                                "result": result})
 
     def transition(self, run: Run, name: str, to: str, result: str = "", by: str = "engine") -> dict[str, Any]:
         """One need's move, as the executor reports it."""
@@ -343,17 +347,19 @@ class Runs:
             return self._move(run, run.needs[name], to, by, result)
 
     def event(self, run: Run, body: Any) -> dict[str, Any]:
-        """A remote executor's event (POST /runs/ID/events): idempotent on the need and its sequence
-        number, which is the run's; one that is not the next move of that need is refused."""
+        """A remote executor's event (POST /runs/ID/events): its seq is the need's own, one more than
+        the need's last, and its from the need's state; idempotent on the need and that seq."""
         if not isinstance(body, dict) or not isinstance(body.get("seq"), int) or body.get("need") not in run.needs:
             raise Refusal(400, "an event names a seq, a need of the run, from and to")
         with self.lock:
             for done in run.journal:
-                if done.get("seq") == body["seq"] and done.get("need") == body["need"]:
+                if done.get("need") == body["need"] and done.get("need_seq") == body["seq"]:
                     return done
             need = run.needs[body["need"]]
-            if body.get("from") != need.state or body["seq"] != len(run.journal) + 1:
-                raise Refusal(409, f"{need.name} is {need.state} at event {len(run.journal)}")
+            if body.get("from") != need.state:
+                raise Refusal(409, f"{need.name} is {need.state}, not {body.get('from')}")
+            if body["seq"] != need.seq + 1:
+                raise Refusal(409, f"{need.name}'s next event is {need.seq + 1}, not {body['seq']}")
             return self._move(run, need, str(body.get("to")), "executor", str(body.get("result") or ""))
 
     def set_mode(self, run: Run, name: str, mode: Any, actor: str) -> str:
@@ -417,11 +423,18 @@ class Runs:
     # --- The end
 
     def ended_walking(self, run: Run) -> None:
-        """The executor's end: the run ends as its needs did."""
-        states = {n.state for n in run.needs.values()}
-        state = ("stopped" if run.stopping else "failed" if states & {"failed", "blocked", "stopped"} else "done")
-        bad = ", ".join(f"{n.name} {n.state}" for n in run.needs.values() if n.state in ("failed", "blocked", "stopped"))
-        self._finish(run, state, f"not ready: {bad}" if bad and state == "failed" else "")
+        """The executor's end: stopped when a person stopped it; failed when a need failed, was
+        blocked or cancelled; done otherwise, noting each need left unknown (the walk could not
+        judge it), as a check of the service's needs does."""
+        def named(states: tuple[str, ...]) -> str:
+            return ", ".join(f"{n.name} {n.state}" for n in run.needs.values() if n.state in states)
+        bad, unknown = named(("failed", "blocked", "stopped")), named(("unknown",))
+        if run.stopping:
+            self._finish(run, "stopped", "")
+        elif bad:
+            self._finish(run, "failed", f"not ready: {bad}")
+        else:
+            self._finish(run, "done", f"not judged: {unknown}" if unknown else "")
 
     def _finish(self, run: Run, state: str, why: str, needs: dict[str, Any] | None = None) -> None:
         """The run's end, and its request's: the same state, each need's state, the reason."""
