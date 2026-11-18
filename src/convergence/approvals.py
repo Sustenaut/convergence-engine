@@ -295,6 +295,11 @@ class Approvals:
                 raise
         self.log(f"convergence: request {ask.id} ({ask.kind} {ask.repository} {ask.unit}): {state} by {by}")
 
+    def fail(self, ask: Ask, error: str) -> None:
+        """End a request failed, by the engine, saying why: one whose run cannot go on."""
+        if not ask.ended:
+            self._end(ask, "failed", "engine", error=error)
+
     def _end(self, ask: Ask, state: str, by: str, **changed: Any) -> None:
         """An end the journal refused is still the end: said in the log, kept in memory. A live
         request's run ends with it, when it had not."""

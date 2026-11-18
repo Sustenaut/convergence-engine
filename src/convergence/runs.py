@@ -309,9 +309,8 @@ class Runs:
             except ValueError as e:  # a record its machine does not replay: said, left out, its request failed
                 self.log(f"convergence: {e}: the run is left out")
                 ask = self.approvals.asks.get(str(data.get("request_id") or ""))
-                if ask is not None and not ask.ended:
-                    self.approvals._end(ask, "failed", "engine",  # noqa: SLF001
-                                        error="its run's record does not replay in its machine: ask again")
+                if ask is not None:
+                    self.approvals.fail(ask, "its run's record does not replay in its machine: ask again")
                 continue
             run.token = secrets.token_urlsafe(24)
             self.runs[run.id] = run
