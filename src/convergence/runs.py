@@ -10,7 +10,10 @@ change of the block never rewrites a run in flight.
 
 Each need moves through waiting, checking, then ready, or found (missing or drift),
 which a fulfil need of grade auto leaves for fulfilling and a check again; failed,
-blocked and stopped end it too. A need starts once every need it comes after has
+blocked, unknown and stopped end it too. Which move a need may make is pubdeploy's
+machine's to say (pubdeploy.machine: load, send, states): each need's region is a chart
+of its own, and a move the executor reports is the event that makes it, refused (409)
+when the chart does not take it. A need starts once every need it comes after has
 ended; one after a need that failed, was blocked or stopped is blocked. The executor
 (executor.py) walks each need with `pubdeploy walk --need NAME`, as many at once as the
 machine's `parallel` allows, and reports each move here (transition), as a remote
@@ -43,17 +46,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from pubdeploy import machine as need_machine
+
 from .approvals import Ask, JournalRefused, Ledger, nothing_to_fulfil, plan_of, plan_sha256, public
 
 HEAD = "convergence.runs"
 SCHEMA = "convergence-run/1"
 FINAL = ("ready", "failed", "blocked", "stopped", "unknown")  # unknown: the walk could not judge it
 STATES = ("waiting", "checking", "found", "fulfilling", *FINAL)
-# Each need state's moves; `found` ends a need unless it is fulfilled.
-MOVES = {"waiting": ("checking", "blocked", "stopped"),
-         "checking": ("ready", "found", "failed", "blocked", "stopped", "unknown"),
-         "found": ("fulfilling",),
-         "fulfilling": ("checking", "failed", "stopped")}
 ENDED = ("done", "failed", "declined", "expired", "stopped")
 STOPS = ("signal", "shorten", "continue")
 KEEP_ENDED = 50
@@ -76,6 +76,9 @@ class Need:
     result: str = ""
     fulfilled: bool = False  # a fulfil has run: a check after it that finds it again fails it
     seq: int = 0  # the need's own events, numbered: an executor's event is the next of them
+    key: str = ""  # its region's key in the machine (the need's id as a name may hold it): its events'
+    meta: dict[str, Any] = field(default_factory=dict)  # its region's meta, as the machine has it
+    chart: Any = None  # its region, as pubdeploy.machine loads it: what says which move it may make
 
     @property
     def ended(self) -> bool:
@@ -155,27 +158,81 @@ def _epoch(text: str) -> float:
 def needs_of_machine(machine: dict[str, Any], modes: dict[str, str]) -> dict[str, Need]:
     """The run's needs, from the compiled machine: one child of `running` each, its meta
     naming mode, grade, type, stop class, after-edges and budget; `modes` overrides a mode."""
+    regions = ((machine.get("states") or {}).get("running") or {}).get("states", {})
+    names = {key: str((child.get("meta") or {}).get("need") or key) for key, child in regions.items()}
     out = {}
-    for name, child in ((machine.get("states") or {}).get("running") or {}).get("states", {}).items():
-        meta = child.get("meta") or {}
+    for key, child in regions.items():
+        meta, name = child.get("meta") or {}, names[key]
         stop = meta.get("stop") if meta.get("stop") in STOPS else "signal"
         out[name] = Need(name, mode=modes.get(name, meta.get("mode", "fulfil")), grade=meta.get("grade", "auto"),
                          type=meta.get("type", name.split(":")[0]), stop=stop,
                          stop_warning=str(meta.get("stop_warning") or ""),
-                         after=[str(a) for a in meta.get("after") or []],
-                         seconds=float(meta.get("seconds") or 60))
+                         after=[names.get(str(a), str(a)) for a in meta.get("after") or []],
+                         seconds=float(meta.get("seconds") or 60), key=key, meta=dict(meta))
     return out
+
+
+def chart_of(need: Need) -> Any:
+    """The need's region, as pubdeploy.machine loads it, in the need's mode (the run's switch
+    may have changed it). A region alone: the machine's one event to every region is stop,
+    and a run stops each need as its stop class says, so each need is a chart of its own;
+    the after-edges are the executor's to keep."""
+    meta = {**need.meta, "mode": need.mode, "after": []}
+    meta.setdefault("grade", need.grade)
+    meta.setdefault("type", need.type)
+    meta.setdefault("stop", need.stop)
+    if meta["stop"] == "continue":
+        meta.setdefault("stop_warning", need.stop_warning or "it must finish")
+    return need_machine.load({"id": "service-needs", "initial": "running", "meta": {"schema": need_machine.SCHEMA},
+                              "states": {"running": {"type": "parallel",
+                                                     "states": {need.key: need_machine.region(need.key, meta)}}}})
+
+
+def event_of(need: Need, to: str) -> dict[str, Any] | None:
+    """The machine's event that moves the need from where it is to `to`, as the executor
+    and a remote one name the move (its new state); None when no event names that move."""
+    key, frm = need.key, need.state
+    if to == "stopped":
+        return {"type": "stop"}
+    if to == "failed":
+        return {"type": f"error.{key}"}
+    if frm == "waiting":
+        return {"type": f"start.{key}"} if to == "checking" else (
+            {"type": f"predecessor_failed.{key}"} if to == "blocked" else None)
+    if frm == "checking" and to in ("ready", "found", "unknown", "blocked"):
+        return {"type": f"checked.{key}", "state": {"found": "missing"}.get(to, to)}
+    if frm == "found" and to == "fulfilling":
+        return {"type": f"approved.{key}"}
+    if frm == "fulfilling" and to == "checking":
+        return {"type": f"fulfilled.{key}", "ok": True}
+    return None
+
+
+def step(need: Need, to: str) -> bool:
+    """Move the need's chart to `to`, by the machine's event for it: False, and nothing moved,
+    when the machine has no such move from where the need is."""
+    need.key = need.key or need_machine.key_of(need.name, set())
+    if need.chart is None:
+        need.chart = chart_of(need)
+    event = event_of(need, to)
+    if event is None:
+        return False
+    need_machine.send(need.chart, event)  # an event its state has no move for moves nothing
+    return need_machine.states(need.chart).get(need.key) == to
 
 
 def replay(run: Run) -> None:
     """Each need where its journal leaves it: every need starts waiting, and each event moves one."""
     for need in run.needs.values():
-        need.state, need.since, need.result, need.fulfilled, need.seq = "waiting", "", "", False, 0
+        need.state, need.since, need.result, need.fulfilled, need.seq, need.chart = "waiting", "", "", False, 0, None
     for event in run.journal:
         need = run.needs.get(event.get("need") or "")
-        if need is not None and event["to"] in STATES:  # a mode switch or a note moves nothing
+        if need is not None and event["to"] in STATES and event["to"] != need.state:  # a switch or a note moves nothing
             if need.state == "fulfilling" and event["to"] == "checking":
                 need.fulfilled = True
+            if not step(need, event["to"]):
+                raise ValueError(f"run {run.id}: its journal moves {need.name} from {need.state} to {event['to']}, "
+                                 "which its machine does not")
             need.state, need.since, need.result = event["to"], event["at"], event.get("result") or ""
             need.seq = int(event.get("need_seq") or need.seq)
 
@@ -241,14 +298,19 @@ class Runs:
         with its pod, so its needs not ended fail, executor lost, and nothing walks again."""
         document = self.ledger.load() or {}
         for data in [*document.get("ended", []), *document.get("open", [])]:
-            run = Run.from_record(data)
+            try:
+                run = Run.from_record(data)
+            except ValueError as e:  # a record its machine does not replay: said, and left out
+                self.log(f"convergence: {e}: the run is left out")
+                continue
             run.token = secrets.token_urlsafe(24)
             self.runs[run.id] = run
         for run in [r for r in self.runs.values() if r.state in ("planning", "approved", "running")]:
-            with self.lock:
+            with self.lock:  # a walk in flight failed with its pod; a need not begun is stopped
                 for need in run.needs.values():
                     if not need.ended:
-                        self._move(run, need, "failed", "engine", "executor lost: the engine restarted")
+                        self._move(run, need, "failed" if need.state in ("checking", "fulfilling") else "stopped",
+                                   "engine", "executor lost: the engine restarted")
             self._finish(run, "failed", "executor lost: the engine restarted while it walked")
 
     # --- Made, planned, decided
@@ -332,7 +394,7 @@ class Runs:
     # --- Moves
 
     def _move(self, run: Run, need: Need, to: str, by: str, result: str = "") -> dict[str, Any]:
-        if to not in MOVES.get(need.state, ()):
+        if to not in STATES or not step(need, to):
             raise Refusal(409, f"{need.name} is {need.state}: it does not move to {to}")
         if need.state == "fulfilling" and to == "checking":
             need.fulfilled = True
@@ -373,7 +435,7 @@ class Runs:
                 raise Refusal(404, "the run has no such need")
             run.modes[name] = mode
             if name in run.needs:
-                run.needs[name].mode = mode
+                run.needs[name].mode, run.needs[name].chart = mode, None
             run.plan_key = run_key(run.plan, run.needs)
             ask = self.approvals.asks[run.request_id]
             ask.modes, ask.plan_sha256 = dict(run.modes), run.plan_key if run.plan else ask.plan_sha256
