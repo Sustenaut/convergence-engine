@@ -240,8 +240,8 @@ opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
     # via fastapi
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.1/pubdeploy-0.5.1-py3-none-any.whl \
-    --hash=sha256:efbbcc3b1741f7a9296a497a68ad4ab7560fd2a6b5371c4e69c3aa5fba854b70
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl \
+    --hash=sha256:d783284288181f025e11d64505c1a28cf52ba24231d5309e03d1073914cfa457
     # via -r requirements.in
 pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
