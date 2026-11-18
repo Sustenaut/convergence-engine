@@ -6,3 +6,5 @@
 coverage==7.16.2
 # FastAPI's test client.
 httpx==0.28.1
+# uv's uvx, the image's version: a scenario launches a walk through it as ./pubsec and ./pubdeploy do.
+uv==0.12.18

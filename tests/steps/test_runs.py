@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from pathlib import Path
@@ -778,7 +779,8 @@ def _probe_wheel(where: Path) -> Path:
 
 @given("a walk launched as ./pubsec run -- ./pubdeploy launches one: uvx, an exec, uvx again, then python")
 def nested_walk(live: Live, tmp_path: Path) -> None:
-    if shutil.which("uvx") is None:
+    path = os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])
+    if shutil.which("uvx", path=path) is None:  # tests/requirements.txt installs it with the suite
         pytest.skip("uvx is not on this machine")
     wheel = _probe_wheel(tmp_path)
     (tmp_path / "probe.py").write_text(PROBE)
@@ -788,7 +790,7 @@ def nested_walk(live: Live, tmp_path: Path) -> None:
         "'import os, sys; c = sys.argv[sys.argv.index(\"--\") + 1:]; os.execvp(c[0], c)' \"$@\"\n")
     for launcher in ("pubdeploy", "pubsec"):
         (tmp_path / launcher).chmod(0o755)
-    env = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_OFFLINE": "1"}
+    env = {**os.environ, "PATH": path, "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_OFFLINE": "1"}
     live.walk_dir = tmp_path
     live.proc = Popen(["./pubsec", "run", "--", "./pubdeploy", "walk", "--need", "k8s.secret:a"], tmp_path, env)
 

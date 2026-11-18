@@ -217,15 +217,8 @@ def step(need: Need, to: str) -> bool:
     event = event_of(need, to)
     if event is None:
         return False
-    try:
-        need_machine.send(need.chart, event)
-    except Exception:  # noqa: BLE001 - python-statemachine's refusal of an event the state has not
-        return False
-    moved = need_machine.states(need.chart).get(need.key)
-    if moved != to:  # the event moved it elsewhere: the chart is replayed to where the need is
-        need.chart = None
-        return False
-    return True
+    need_machine.send(need.chart, event)  # an event its state has no move for moves nothing
+    return need_machine.states(need.chart).get(need.key) == to
 
 
 def replay(run: Run) -> None:

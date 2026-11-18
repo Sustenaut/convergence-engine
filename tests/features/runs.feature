@@ -115,6 +115,12 @@ Feature: Live runs, need by need
     Then the walking run ended "failed" with "k8s.secret:a" failed, saying "executor lost"
     And the run awaiting approval still awaits it in the new pod
 
+  Scenario: A move the need's machine has no event for is refused
+    Given the live needs "k8s.secret:a" missing
+    When a GitHub run asks for a live check
+    Then the run ends "done" with "k8s.secret:a" found
+    And an event from "found" to "fulfilling" now is refused with 409
+
   Scenario: A run whose journal its machine does not replay is left out, said in the log
     Given the live needs "k8s.secret:a" ready
     When a GitHub run asks for a live check
