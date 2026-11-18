@@ -55,6 +55,9 @@ class Settings:
     request_hours: int = 24
     request_owners: tuple[str, ...] = ("Sustenaut",)
     requesters: tuple[str, ...] = ()
+    # Live runs (runs.py): how often the run page polls, and the image the executor walks in.
+    run_poll_ms: int = 2000
+    image: str = ""
 
 
 def _slug(value: str, what: str) -> str:
@@ -105,4 +108,5 @@ def settings(env: Mapping[str, str]) -> Settings:
         google_read_token=Path(env.get("CONVERGENCE_GOOGLE_READ_TOKEN_FILE", "/var/run/secrets/google-read/token")),
         google_write_token=Path(env.get("CONVERGENCE_GOOGLE_WRITE_TOKEN_FILE", "/var/run/secrets/google-write/token")),
         site=env.get("CONVERGENCE_SITE", "https://convergence.sustenaut.eu").rstrip("/"),
-        request_hours=hours, request_owners=owners, requesters=requesters)
+        request_hours=hours, request_owners=owners, requesters=requesters,
+        run_poll_ms=int(env.get("CONVERGENCE_RUN_POLL_MS", "2000")), image=env.get("CONVERGENCE_IMAGE", ""))

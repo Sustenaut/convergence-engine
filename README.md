@@ -65,6 +65,12 @@ Behind oauth2-proxy and the team sign-in, for people with the role `convergence`
 | `/approvals/ID` | one request: its plan and the plan's sha256, where it came from (with a link to the GitHub run), Approve and Decline while it awaits, each state change with who and when, and a Fulfil's output and end states; it reloads itself while it works |
 | `POST /approvals/ID` | a person's Approve or Decline |
 | `/fulfils/ID` | 4b's links: redirects to `/approvals/ID` |
+| `GET /runs/ID?since=SEQ` | a live run (JSON): its state, machine, plan, plan key, each need's state, mode, grade, type, stop class and result, its journal after SEQ, and `poll_ms` (2000); public() throughout, and kept an hour once it has ended |
+| `POST /runs` | a signed-in approver's live run, JSON `{repository, unit, mode: check\|fulfil, modes?}`: a request of theirs, which awaits approval as any (a check needs none) |
+| `POST /runs/ID/approve` | approve it, JSON `{plan_key}`: the request's approval (the same rule), which freezes the modes |
+| `POST /runs/ID/stop` | before approval, decline; while it walks, stop (each need as its class says); 204 once it has ended |
+| `POST /runs/ID/needs/NAME/mode` | switch a need to check or fulfil, before approval only (409 after): the plan's key again |
+| `POST /runs/ID/needs/NAME/cancel` | cancel a need that must finish (stop class continue) while it fulfils: JSON `{"confirm": "NAME"}`, its name typed |
 | `/theme/…` | the vendored theme's files, as `theme.json` pins them |
 | `/healthz` | open; 200 while rounds end in time |
 
@@ -73,7 +79,8 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 
 | Path | What |
 |---|---|
-| `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}`, `{"kind": "check", "unit": "U"}` (read-only: the plan walk, then done with each need's state, asking no one) or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
+| `POST /runs/ID/events` | a remote executor's event, `{seq, need, from, to, result?, at}`, with the run's own bearer token; idempotent on the need and its sequence number |
+| `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` (with `"mode": "live"` and maybe `"modes": {NEED: "check"\|"fulfil"}`, a live run), `{"kind": "check", "unit": "U"}` (read-only: the plan walk, then done with each need's state, asking no one) or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
 | `GET /requests/ID` | the request's state, its plan (each need's name, state and what the fulfil changes) and result (every need's name, type, grade, state and what the walk found, the error, or a note), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
 The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
@@ -141,6 +148,30 @@ Each event also holds the open requests and the last ended ones, so a new pod pi
 them up from the head: a request that was planning or running ends `failed`, and an
 approved fulfil runs.
 
+**Live runs** (`runs.py`, `executor.py`). A fulfil or check asked with `"mode": "live"`
+(inline, the unit in one walk, stays the default) is walked need by need. Its plan walk is
+the request's; its machine is the service's own, `pubdeploy machine --unit U --mode M
+[--modes NEED=MODE,...]` (XState v5 JSON: a parallel state `running`, one child per need,
+each need's meta naming its mode, grade, type, stop class, after-edges and budget), kept
+with the run so a later change of the deploy block never rewrites a run in flight. A
+need moves through `waiting`, `checking`, then `ready`, or `found` (missing or drift),
+which a fulfil need of grade auto leaves for `fulfilling` and a check again; `failed`,
+`blocked` and `stopped` end it too. The executor walks each need by itself, `pubdeploy
+walk --unit U --need NAME --budget-seconds S [--fulfil --yes]`, once every need it comes
+after has ended (after one that failed, was blocked or stopped, it is blocked), as many at
+once as the machine's `parallel` (4) allows, one run of a service at a time; a walk past
+its need's budget and 60 s more fails it. A need's modes switch until approval, which
+freezes them, and the plan's key, which the approval binds to, counts them. Stop before
+approval declines; while it walks, what has not started never starts, and a need walking
+stops as its class says: `signal` (terminated), `shorten` (its budget ends now) or
+`continue` (it finishes, noted; only its own cancel, its name typed, ends it). A run ends
+`done`, `failed` or `stopped`, its request in the same state (`stopped` is new to a
+caller), and each need's journal goes to the need-states facts. Each move is an event of
+the run's journal, written with the run to storage's head `convergence.runs` (tenant
+`plane`) before it counts; a new pod reads the runs back from it: one awaiting approval
+waits on, one that was walking ended with its pod, so its needs not ended fail ("executor
+lost") and nothing walks again. What a run shows is public() (no email, no link).
+
 **Fulfil** (step 4b) runs in the service's clone and makes each auto need that is
 missing or drifted. A service is never walked by two at once: a request's walks wait
 for a round or another request to end, and a Fulfil may take
@@ -188,6 +219,8 @@ observability's `OBSERVABILITY_SENDERS`, so rounds that stop show as `sender_sil
 | `CONVERGENCE_REQUEST_HOURS` | `24` | how long a request awaits a decision before it expires (1 to 168) |
 | `CONVERGENCE_REQUEST_OWNERS` | `Sustenaut` | the owners whose repositories' GitHub runs may ask, comma-separated |
 | `CONVERGENCE_REQUESTERS` | none (`integrations:app` in `k8s/engine.yaml`) | the ServiceAccounts, `NAMESPACE:NAME`, that may ask for a gate |
+| `CONVERGENCE_RUN_POLL_MS` | `2000` | how often a live run's page asks for its state |
+| `CONVERGENCE_IMAGE` | none | the image a live run names as the one its needs were walked in |
 | `CONVERGENCE_*_FILE`, `CONVERGENCE_GITHUB_APP_DIR` | as `k8s/engine.yaml` mounts them | the credentials |
 
 `python -m convergence services state.json` prints the services a state file lists.

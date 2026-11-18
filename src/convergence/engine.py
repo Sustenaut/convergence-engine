@@ -16,6 +16,7 @@ round ever gets. The journal says who approved it (PUBRULES_WALK_BY, their email
 from __future__ import annotations
 
 import dataclasses
+import json
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -23,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import facts, state
+from . import facts, state, walker
 from .clones import CloneFailed, Clones
 from .config import Settings
 from .walker import Credentials, Walk, walk
@@ -227,6 +228,48 @@ class Engine:
         self.log(f"convergence: {repository} {unit}: fulfil by {actor} ended"
                  f"{': ' + result.error if result.error else ''}")
         return result
+
+    def machine(self, repository: str, unit: str, mode: str, modes: Mapping[str, str], by: str) -> dict | str:
+        """The unit's need machine, as the service's own pubdeploy compiles it (`pubdeploy machine`):
+        XState v5 JSON, or why there is none. Read-only, with a round's credentials."""
+        credentials = self.credentials()
+        clone = self.clones.refresh(repository, credentials.github_token)
+        argv = ["./pubdeploy", "machine", "--unit", unit, "--mode", mode]
+        if modes:
+            argv += ["--modes", ",".join(f"{k}={v}" for k, v in sorted(modes.items()))]
+        ran = self.clones.runner(argv, clone, walker.environment(self.base_env, credentials, by,
+                                                                 self.settings.work / "cache"),
+                                 self.settings.walk_seconds)
+        try:
+            machine = json.loads(ran.stdout) if ran.code == 0 else None
+        except ValueError:
+            machine = None
+        if not isinstance(machine, dict) or "running" not in (machine.get("states") or {}):
+            said = (ran.stderr.strip().splitlines() or [f"exit {ran.code}"])[-1][:300]
+            return f"pubdeploy machine gave no machine ({said})"
+        return machine
+
+    def need_command(self, repository: str, unit: str, need: str, fulfil: bool, budget: float,
+                     by: str) -> tuple[list[str], Path, dict[str, str]]:
+        """One need's walk, as a live run's executor runs it: `pubdeploy walk --need NAME`, with
+        --fulfil and the write credentials only when it fulfils. The argv, where, and the
+        environment built from nothing, as every walk's."""
+        credentials = self.credentials()
+        if fulfil:
+            write = self.settings.bitwarden_write_token
+            credentials = dataclasses.replace(
+                credentials, github_token=self.fulfil_token(),
+                write_token_file=str(write) if write and write.is_file() else "",
+                google=self.google.get("write", ()))
+        clone = self.clones.refresh(repository, credentials.github_token)
+        command = ["./pubdeploy", "walk", "--unit", unit, "--need", need, "--budget-seconds", f"{budget:g}",
+                   *(["--fulfil", "--yes"] if fulfil else []), "--json", "--journal", self.settings.storage_url]
+        zones = self._zones_of(repository)
+        if zones:
+            command += ["--zones", f"../{zones}/{walker.CONFIG}"]
+        if credentials.bitwarden_token and (clone / "pubsec").is_file():
+            command = ["./pubsec", "run", "--", *command]
+        return command, clone, walker.environment(self.base_env, credentials, by, self.settings.work / "cache")
 
     def _publish(self, document: dict[str, Any]) -> None:
         if self.buffer is None:
