@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from pubdeploy import machine as need_machine
+
 from . import facts, state, walker
 from .clones import CloneFailed, Clones
 from .config import Settings
@@ -247,6 +249,8 @@ class Engine:
         if not isinstance(machine, dict) or "running" not in (machine.get("states") or {}):
             said = (ran.stderr.strip().splitlines() or [f"exit {ran.code}"])[-1][:300]
             return f"pubdeploy machine gave no machine ({said})"
+        if bad := need_machine.validate(machine):  # what the engine's pubdeploy runs, it must read
+            return f"pubdeploy machine gave a machine this engine does not run ({'; '.join(bad)[:300]})"
         return machine
 
     def need_command(self, repository: str, unit: str, need: str, fulfil: bool, budget: float,

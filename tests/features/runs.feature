@@ -99,6 +99,7 @@ Feature: Live runs, need by need
     Then both answers are the same event, and the journal holds it once
     And the event carries the need's own sequence number
     And an event from "waiting" to "checking" now is refused with 409
+    And an event from "checking" to "fulfilling" now is refused with 409
     And an event out of its need's order is refused with 409
     And an event without the run's token is refused with 403
     And an event that names no need is refused with 400
@@ -113,6 +114,14 @@ Feature: Live runs, need by need
     And a new pod starts the runs from storage
     Then the walking run ended "failed" with "k8s.secret:a" failed, saying "executor lost"
     And the run awaiting approval still awaits it in the new pod
+
+  Scenario: A run whose journal its machine does not replay is left out, said in the log
+    Given the live needs "k8s.secret:a" ready
+    When a GitHub run asks for a live check
+    Then the run ends "done" with "k8s.secret:a" ready
+    When storage's record of the run says "k8s.secret:a" went from "waiting" to "ready"
+    And a new pod starts the runs from storage
+    Then the new pod leaves the run out, and its log says so
 
   Scenario: What a run shows holds no email and no link, and an ended run may be kept
     Given the live needs "k8s.secret:a" missing
@@ -247,6 +256,7 @@ Feature: Live runs, need by need
     Examples:
       | wrong                                              | kind   | said                                    |
       | pubdeploy compiles a machine that is not JSON      | fulfil | pubdeploy machine gave no machine        |
+      | pubdeploy compiles a machine it does not run      | fulfil | a machine this engine does not run       |
       | pubdeploy machine cannot run                       | fulfil | pubdeploy machine could not run          |
       | the journal refuses the request's awaiting         | fulfil | the journal refused its plan             |
       | the journal refuses the request's start            | check  | the journal refused its start            |
@@ -264,3 +274,8 @@ Feature: Live runs, need by need
     Then an event from "waiting" to "ready" now is refused with 409
     And stopping a need that is not walking does nothing
     And a stop the request refuses answers 409
+
+  Scenario: A shorten's SIGUSR1 reaches the walk through ./pubsec run's two uvx launchers
+    Given a walk launched as ./pubsec run -- ./pubdeploy launches one: uvx, an exec, uvx again, then python
+    When the executor's walk process is told its budget has ended
+    Then the walk's own SIGUSR1 handler ran

@@ -4,17 +4,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pubdeploy import machine as need_machine
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence.approvals import Ledger
 from convergence.clones import Ran
-from convergence.executor import Executor
+from convergence.executor import Executor, Popen
 from convergence.journals import Journals
 from convergence.page import create_app
 from convergence.runs import HEAD, Runs
@@ -89,11 +93,9 @@ class Spawn:
 
 
 def machine(needs: dict[str, dict]) -> dict:
-    return {"id": "notifier", "initial": "running", "meta": {"parallel": 4},
-            "states": {"running": {"type": "parallel", "states": {
-                name: {"initial": "waiting", "meta": meta, "states": {s: {} for s in (
-                    "waiting", "checking", "found", "fulfilling", "ready", "failed", "blocked", "stopped")}}
-                for name, meta in needs.items()}}}}
+    """The unit's machine, as pubdeploy compiles it: a region per need, keyed as pubdeploy keys it."""
+    plan = [{"id": name, **{k: v for k, v in meta.items() if k != "mode"}} for name, meta in needs.items()]
+    return need_machine.compile(plan, modes={name: meta["mode"] for name, meta in needs.items()})
 
 
 class Live:
@@ -332,6 +334,23 @@ def second_run(live: Live) -> None:
     live.awaiting = live.runs.runs[answer.json()["id"]]
     w.approvals.wait()
     assert live.awaiting.state == "awaiting"
+
+
+@when(parsers.parse('storage\'s record of the run says "{need}" went from "{frm}" to "{to}"'))
+def record_rewritten(live: Live, need: str, frm: str, to: str) -> None:
+    document = live.runs.ledger.load()
+    for record in document["ended"]:
+        if record["id"] == live.run.id:
+            kept = [e for e in record["journal"] if e.get("need") != need]
+            record["journal"] = [*kept, {"seq": len(kept) + 1, "need": need, "need_seq": 1, "from": frm, "to": to,
+                                         "at": kept[-1]["at"], "by": "executor"}]
+    live.runs.ledger.append(document)
+
+
+@then("the new pod leaves the run out, and its log says so")
+def left_out(live: Live) -> None:
+    assert live.run.id not in live.runs.runs
+    assert any(live.run.id in line and "left out" in line for line in live.world.lines), live.world.lines
 
 
 @when("a new pod starts the runs from storage")
@@ -641,6 +660,14 @@ def journal_says_by(live: Live, said: str) -> None:
     assert WHO not in view
 
 
+@given("pubdeploy compiles a machine it does not run")
+def machine_unrunnable(live: Live) -> None:
+    bad = machine(live.needs)
+    for region in bad["states"]["running"]["states"].values():
+        region["meta"]["mode"] = "sometimes"
+    live.world.runner.machines[REPOSITORY] = Ran(0, json.dumps(bad), "")
+
+
 @given("pubdeploy compiles a machine that is not JSON")
 def machine_garbage(live: Live) -> None:
     live.world.runner.machines[REPOSITORY] = Ran(0, "<html>", "")
@@ -718,3 +745,66 @@ def never_starts(live: Live, need: str) -> None:
     calls = len(live.spawn.calls)
     walked = live.runs.executor._walk(live.run, live.run.needs[need], False)  # noqa: SLF001 - the race, made certain
     assert walked == ("stopped", "stopped before its walk began") and len(live.spawn.calls) == calls
+
+
+# A real nested launch: uvx, the exec `pubsec run` does, uvx again, then the walk's
+# Python, as ./pubsec run -- ./pubdeploy runs one. uvx runs its tool as a child and
+# passes SIGUSR1 on, so a shorten reaches pubdeploy's handler without a process group.
+PROBE = """import os, signal, sys, time
+signal.signal(signal.SIGUSR1, lambda *_: (print("SIGUSR1 handled", flush=True), sys.exit(0)))
+open("ready", "w").close()
+time.sleep(30)
+print("no SIGUSR1", flush=True)
+"""
+
+
+def _probe_wheel(where: Path) -> Path:
+    """A wheel with nothing in it but its name, which uvx installs offline."""
+    import base64
+    import hashlib
+    import zipfile
+    name, wheel = "sigprobe-0.0.0", where / "sigprobe-0.0.0-py3-none-any.whl"
+    files = {"sigprobe/__init__.py": "", f"{name}.dist-info/METADATA": "Metadata-Version: 2.1\nName: sigprobe\nVersion: 0.0.0\n",
+             f"{name}.dist-info/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+    record = []
+    with zipfile.ZipFile(wheel, "w") as z:
+        for path, text in files.items():
+            z.writestr(path, text)
+            digest = base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest()).rstrip(b"=").decode()
+            record.append(f"{path},sha256={digest},{len(text)}")
+        z.writestr(f"{name}.dist-info/RECORD", "\n".join([*record, f"{name}.dist-info/RECORD,,"]) + "\n")
+    return wheel
+
+
+@given("a walk launched as ./pubsec run -- ./pubdeploy launches one: uvx, an exec, uvx again, then python")
+def nested_walk(live: Live, tmp_path: Path) -> None:
+    if shutil.which("uvx") is None:
+        pytest.skip("uvx is not on this machine")
+    wheel = _probe_wheel(tmp_path)
+    (tmp_path / "probe.py").write_text(PROBE)
+    (tmp_path / "pubdeploy").write_text(f'#!/usr/bin/env bash\nexec uvx --from {wheel} python probe.py "$@"\n')
+    (tmp_path / "pubsec").write_text(
+        f"#!/usr/bin/env bash\nexec uvx --from {wheel} python -c "
+        "'import os, sys; c = sys.argv[sys.argv.index(\"--\") + 1:]; os.execvp(c[0], c)' \"$@\"\n")
+    for launcher in ("pubdeploy", "pubsec"):
+        (tmp_path / launcher).chmod(0o755)
+    env = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_OFFLINE": "1"}
+    live.walk_dir = tmp_path
+    live.proc = Popen(["./pubsec", "run", "--", "./pubdeploy", "walk", "--need", "k8s.secret:a"], tmp_path, env)
+
+
+@when("the executor's walk process is told its budget has ended")
+def budget_ends(live: Live) -> None:
+    deadline = time.monotonic() + 60
+    while not (live.walk_dir / "ready").exists():
+        assert time.monotonic() < deadline and live.proc.process.poll() is None, "the walk never started"
+        time.sleep(0.05)
+    live.proc.budget()
+    live.ended = live.proc.poll(30)
+
+
+@then("the walk's own SIGUSR1 handler ran")
+def handler_ran(live: Live) -> None:
+    assert live.ended is not None, "the walk kept running"
+    code, out, err = live.ended
+    assert "SIGUSR1 handled" in out and code == 0, (code, out, err)
