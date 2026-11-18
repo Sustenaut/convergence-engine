@@ -86,7 +86,10 @@ class Need:
 
     @property
     def fulfils(self) -> bool:
-        return self.mode == "fulfil" and self.grade == "auto" and not self.fulfilled
+        """Whether a found need goes on to fulfilling: pubdeploy's machine says, by the rule its
+        regions are made with (fulfils_need), once; a need fulfilled and found again does not go
+        round again."""
+        return not self.fulfilled and need_machine.fulfils_need({"mode": self.mode, "grade": self.grade})
 
     def view(self) -> dict[str, Any]:
         return {"state": self.state, "mode": self.mode, "grade": self.grade, "type": self.type, "stop": self.stop,
@@ -188,14 +191,17 @@ def chart_of(need: Need) -> Any:
                                                      "states": {need.key: need_machine.region(need.key, meta)}}}})
 
 
-def event_of(need: Need, to: str) -> dict[str, Any] | None:
+def event_of(need: Need, to: str, ok: bool | None = None) -> dict[str, Any] | None:
     """The machine's event that moves the need from where it is to `to`, as the executor
-    and a remote one name the move (its new state); None when no event names that move."""
+    and a remote one name the move (its new state); None when no event names that move.
+    A fulfil that ran and left the need as it was (`ok` False) is fulfilled, not ok; any other
+    failure is an error."""
     key, frm = need.key, need.state
     if to == "stopped":
         return {"type": "stop"}
     if to == "failed":
-        return {"type": f"error.{key}"}
+        return ({"type": f"fulfilled.{key}", "ok": False} if frm == "fulfilling" and ok is False
+                else {"type": f"error.{key}"})
     if frm == "waiting":
         return {"type": f"start.{key}"} if to == "checking" else (
             {"type": f"predecessor_failed.{key}"} if to == "blocked" else None)
@@ -208,17 +214,17 @@ def event_of(need: Need, to: str) -> dict[str, Any] | None:
     return None
 
 
-def step(need: Need, to: str) -> bool:
+def step(need: Need, to: str, ok: bool | None = None) -> str:
     """Move the need's chart to `to`, by the machine's event for it: False, and nothing moved,
-    when the machine has no such move from where the need is."""
+    when the machine has no such move from where the need is. The event's type when it moved."""
     need.key = need.key or need_machine.key_of(need.name, set())
     if need.chart is None:
         need.chart = chart_of(need)
-    event = event_of(need, to)
+    event = event_of(need, to, ok)
     if event is None:
-        return False
+        return ""
     need_machine.send(need.chart, event)  # an event its state has no move for moves nothing
-    return need_machine.states(need.chart).get(need.key) == to
+    return event["type"] if need_machine.states(need.chart).get(need.key) == to else ""
 
 
 def replay(run: Run) -> None:
@@ -230,7 +236,7 @@ def replay(run: Run) -> None:
         if need is not None and event["to"] in STATES and event["to"] != need.state:  # a switch or a note moves nothing
             if need.state == "fulfilling" and event["to"] == "checking":
                 need.fulfilled = True
-            if not step(need, event["to"]):
+            if not step(need, event["to"], event.get("ok")):
                 raise ValueError(f"run {run.id}: its journal moves {need.name} from {need.state} to {event['to']}, "
                                  "which its machine does not")
             need.state, need.since, need.result = event["to"], event["at"], event.get("result") or ""
@@ -300,8 +306,12 @@ class Runs:
         for data in [*document.get("ended", []), *document.get("open", [])]:
             try:
                 run = Run.from_record(data)
-            except ValueError as e:  # a record its machine does not replay: said, and left out
+            except ValueError as e:  # a record its machine does not replay: said, left out, its request failed
                 self.log(f"convergence: {e}: the run is left out")
+                ask = self.approvals.asks.get(str(data.get("request_id") or ""))
+                if ask is not None and not ask.ended:
+                    self.approvals._end(ask, "failed", "engine",  # noqa: SLF001
+                                        error="its run's record does not replay in its machine: ask again")
                 continue
             run.token = secrets.token_urlsafe(24)
             self.runs[run.id] = run
@@ -393,20 +403,22 @@ class Runs:
 
     # --- Moves
 
-    def _move(self, run: Run, need: Need, to: str, by: str, result: str = "") -> dict[str, Any]:
-        if to not in STATES or not step(need, to):
+    def _move(self, run: Run, need: Need, to: str, by: str, result: str = "", ok: bool | None = None) -> dict[str, Any]:
+        if to not in STATES or not (event := step(need, to, ok)):
             raise Refusal(409, f"{need.name} is {need.state}: it does not move to {to}")
         if need.state == "fulfilling" and to == "checking":
             need.fulfilled = True
         frm, need.state, need.since, need.result = need.state, to, _iso(self.clock()), result
         need.seq += 1
         return self._note(run, {"need": need.name, "need_seq": need.seq, "from": frm, "to": to, "by": by,
-                                "result": result})
+                                "result": result, "event": event.split(".")[0],
+                                **({"ok": ok} if ok is not None else {})})
 
-    def transition(self, run: Run, name: str, to: str, result: str = "", by: str = "engine") -> dict[str, Any]:
-        """One need's move, as the executor reports it."""
+    def transition(self, run: Run, name: str, to: str, result: str = "", by: str = "engine",
+                   ok: bool | None = None) -> dict[str, Any]:
+        """One need's move, as the executor reports it: `ok` False when a fulfil ran and left it found."""
         with self.lock:
-            return self._move(run, run.needs[name], to, by, result)
+            return self._move(run, run.needs[name], to, by, result, ok)
 
     def event(self, run: Run, body: Any) -> dict[str, Any]:
         """A remote executor's event (POST /runs/ID/events): its seq is the need's own, one more than
@@ -422,7 +434,8 @@ class Runs:
                 raise Refusal(409, f"{need.name} is {need.state}, not {body.get('from')}")
             if body["seq"] != need.seq + 1:
                 raise Refusal(409, f"{need.name}'s next event is {need.seq + 1}, not {body['seq']}")
-            return self._move(run, need, str(body.get("to")), "executor", str(body.get("result") or ""))
+            ok = body.get("ok") if isinstance(body.get("ok"), bool) else None
+            return self._move(run, need, str(body.get("to")), "executor", str(body.get("result") or ""), ok)
 
     def set_mode(self, run: Run, name: str, mode: Any, actor: str) -> str:
         """A need's mode, switched before approval, which freezes them: the plan's key again."""
