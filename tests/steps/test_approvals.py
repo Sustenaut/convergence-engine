@@ -774,3 +774,10 @@ def ends_noted(world: World, state: str, text: str) -> None:
 def service_page_shows(world: World, text: str) -> None:
     page = world.client.get(f"/services/{REPOSITORY}", headers=person()).text
     assert f"<br><span class=why>{text}</span>" in page
+
+
+@then(parsers.parse('the run\'s poll lists the plan\'s need "{need}" as "{state}"'))
+def poll_plan(world: World, need: str, state: str) -> None:
+    _poll(world, world.token())
+    (entry,) = world.answer.json()["plan"]
+    assert (entry["need"], entry["state"]) == (need, state) and entry["change"].startswith("the fulfil makes it")

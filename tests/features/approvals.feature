@@ -121,6 +121,7 @@ Feature: Requests a person approves first
     Given a GitHub run asked for a fulfil of the unit "notifier"
     When the request's plan has been walked
     Then the request is "awaiting" with a plan of "k8s.secret:s" missing
+    And the run's poll lists the plan's need "k8s.secret:s" as "missing"
     And the plan walk ran "check --unit notifier" as the run's repository
     When the person approves it and the walk makes it ready
     Then the request ends "done" with "k8s.secret:s" ready

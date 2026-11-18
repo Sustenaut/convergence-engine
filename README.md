@@ -74,7 +74,7 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 | Path | What |
 |---|---|
 | `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
-| `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
+| `GET /requests/ID` | the request's state, its plan (each need's name, state and what the fulfil changes) and result (each need's name and state at the end, the error, or a note), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
 The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
 string from a walk or a caller escaped. They wear Sustenaut's theme
