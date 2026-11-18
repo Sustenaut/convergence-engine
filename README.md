@@ -73,8 +73,8 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 
 | Path | What |
 |---|---|
-| `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
-| `GET /requests/ID` | the request's state and result (each need's name and state at the end, or the error), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
+| `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}`, `{"kind": "check", "unit": "U"}` (read-only: the plan walk, then done with each need's state, asking no one) or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
+| `GET /requests/ID` | the request's state, its plan (each need's name, state and what the fulfil changes) and result (every need's name, type, grade, state and what the walk found, the error, or a note), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 
 The pages are plain HTML with no script, `Cache-Control: private, no-store`, and every
 string from a walk or a caller escaped. They wear Sustenaut's theme
@@ -104,7 +104,12 @@ arrival: each need that is not ready, by name, type, state and grade, and what i
 fulfil changes, names only. The approval is bound to the plan's sha256: the unit is
 walked read-only again just before the Fulfil, and if that plan differs the request
 ends `failed`, "plan changed since approval". A unit with nothing to do is `done` at
-once, with no approval. A gate's plan is the caller's text, 8 KB at most.
+once, with no approval, and so is one whose plan holds nothing the fulfil changes (no
+auto need missing or drifted): it ends `failed`, "nothing the engine can fulfil; needs a
+person: …" with each need and what was found (a need missing, drifted or blocked that
+only a person mends), or `done` with that list as its note when the rest is only what the
+engine cannot judge from where it walks (an admin channel's check, and the gate after it).
+Nobody is asked to approve a plan the fulfil would change nothing of. A gate's plan is the caller's text, 8 KB at most.
 
 Who may ask (`callers.py`), with `Authorization: Bearer`:
 

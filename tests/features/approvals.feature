@@ -121,6 +121,7 @@ Feature: Requests a person approves first
     Given a GitHub run asked for a fulfil of the unit "notifier"
     When the request's plan has been walked
     Then the request is "awaiting" with a plan of "k8s.secret:s" missing
+    And the run's poll lists the plan's need "k8s.secret:s" as "missing"
     And the plan walk ran "check --unit notifier" as the run's repository
     When the person approves it and the walk makes it ready
     Then the request ends "done" with "k8s.secret:s" ready
@@ -320,3 +321,78 @@ Feature: Requests a person approves first
       | moment                                                  | why                                         |
       | the person opens the request's page while its plan is walked | The plan is being walked                |
       | the plan has been walked and the person declined it     | This request is declined: it no longer awaits a decision |
+
+  Scenario: A plan with only what a person must mend ends failed at once, asking no one
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "Secret old-key is in the cluster, and nothing reads or declares it", "github.gate:notifier" unknown graded auto
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "failed", saying "nothing the engine can fulfil; needs a person: k8s.secrets-declared:notifier (Secret old-key is in the cluster, and nothing reads or declares it"
+    And the service page shows "Secret old-key is in the cluster, and nothing reads or declares it" beside the need
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the journal holds 2 events, "planning", "failed"
+    And the journal's last event gives the reason and the needs "k8s.secrets-declared:notifier", "github.gate:notifier"
+    And the run's poll says "failed", giving the reason "nothing the engine can fulfil; needs a person"
+
+  Scenario: A plan with only what the engine cannot judge from where it walks ends done, noted
+    Given the engine has walked Sustenaut/notifier and found "k8s.manifests:k8s/admin/network-policy.yaml" unknown graded auto, "github.gate:notifier" unknown graded auto
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "nothing the engine can fulfil; unknown from where the engine walks: k8s.manifests:k8s/admin/network-policy.yaml"
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the run's poll says "done", giving the note "unknown from where the engine walks"
+    And the request's page says "unknown from where the engine walks"
+
+  Scenario: A plan with something the fulfil changes still awaits a person, whatever else it holds
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" missing graded auto, "k8s.secrets-declared:notifier" drift graded none
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    Then the request is "awaiting"
+
+  Scenario: A check walks the unit read-only and ends done with each need's state, asking no one
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with "k8s.secret:s" missing
+    And the request never awaited an approval
+    And no Fulfil walk ran
+    And the request ends "done" with the note "read-only check; not ready: k8s.secret:s missing"
+    And the run's poll says "done", giving the note "not ready: k8s.secret:s missing"
+
+  Scenario: A check of a unit with every need ready says so
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" ready
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "read-only check; every need is ready"
+
+  Scenario: An engine without a write token still checks
+    Given the engine without a write token has walked Sustenaut/notifier
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the request ends "done" with the note "not ready: k8s.secret:s missing"
+
+  Scenario: A check of another repository is refused, as a fulfil is
+    When a GitHub run posts a check of another repository
+    Then the answer is 403 refusing "other-repository"
+
+  Scenario: A check's answer gives every need's type, grade, state and what was found
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "Secret old-key is in the cluster, and nothing reads or declares it", "k8s.namespace:notifier" ready graded auto
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "Secret old-key is in the cluster, and nothing reads or declares it"
+    And the run's poll gives "k8s.namespace:notifier" as type "k8s.namespace", grade "auto", state "ready", found "k8s.namespace:notifier is ready"
+
+  Scenario: What the walk found may change between the plan and the run, and the approval still runs
+    Given the engine has walked Sustenaut/notifier and found "k8s.secret:s" missing graded auto detailing "took 4.1 s, over its budget"
+    When a GitHub run asks for a fulfil of the unit "notifier"
+    And the request's plan has been walked
+    And the walk now finds "k8s.secret:s" missing detailing "took 6.3 s, over its budget"
+    And the person approves it and the walk makes it ready
+    Then the request ends "done" with "k8s.secret:s" ready
+
+  Scenario: What the poll answer carries holds no email and no link
+    Given the engine has walked Sustenaut/notifier and found "k8s.secrets-declared:notifier" drift graded none detailing "ask someone@example.org, see https://example.org/x?token=1"
+    When a GitHub run asks for a check of the unit "notifier"
+    And the request's plan has been walked
+    Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "ask [someone], see [link]"
+    And the request's page says "someone@example.org"

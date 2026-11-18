@@ -29,7 +29,7 @@ def _states(found: str) -> dict[str, str]:
     return dict(re.findall(r'"([^"]+)" (\w+)', found))
 
 
-@given(parsers.parse("the engine has walked Sustenaut/notifier and found {found}"), target_fixture="world")
+@given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?!.* graded )(?P<found>.+)"), target_fixture="world")
 def walked(tmp_path: Path, found: str) -> World:
     w = World(tmp_path, needs=_states(found))
     w.engine.round()
@@ -80,6 +80,20 @@ def run_asked_gate(world: World, text: str) -> None:
 def run_asks_fulfil(world: World, unit: str) -> None:
     _hold(world)
     assert _post(world, world.token(), {"kind": "fulfil", "unit": unit}).status_code == 201
+
+
+@when(parsers.re(r'a GitHub run asks for a check of the unit "(?P<unit>[^"]+)"'))
+def run_asks_check(world: World, unit: str) -> None:
+    _hold(world)
+    assert _post(world, world.token(), {"kind": "check", "unit": unit}).status_code == 201
+
+
+@given("the engine without a write token has walked Sustenaut/notifier", target_fixture="world")
+def walked_no_write(tmp_path: Path) -> World:
+    w = World(tmp_path, fulfil=False)
+    w.engine.round()
+    w.held, w.bearer = False, ""
+    return w
 
 
 @given(parsers.re(r'a GitHub run asked for a fulfil of the unit "(?P<unit>[^"]+)"'))
@@ -220,7 +234,8 @@ BODIES = {"a request of another kind": {"kind": "deploy"},
           "a gate without a plan": {"kind": "gate"},
           "a gate whose plan is over 8 KB": {"kind": "gate", "plan": "x" * 8193},
           "a fulfil of another repository": {"kind": "fulfil", "repository": "Sustenaut/other", "unit": "notifier"},
-          "a fulfil of a unit not there": {"kind": "fulfil", "unit": "x"}}
+          "a fulfil of a unit not there": {"kind": "fulfil", "unit": "x"},
+          "a check of another repository": {"kind": "check", "repository": "Sustenaut/other", "unit": "notifier"}}
 RAW = {"a body that is not JSON": b"nope", "a body over 16 KB": json.dumps({"plan": "x" * 17000}).encode()}
 
 
@@ -472,7 +487,7 @@ def events_named(world: World) -> None:
     events = world.storage.events()
     assert {e["id"] for e in events} == {world.ask.id}
     assert all(e["plan_sha256"] == world.ask.plan_sha256 for e in events[1:])
-    assert events[-1]["needs"] == [{"need": "k8s.secret:s", "state": "ready"}]
+    assert events[-1]["needs"] == [{"need": "k8s.secret:s", "type": "k8s.secret", "grade": "auto", "state": "ready", "detail": "k8s.secret:s is ready"}]
     assert [e["by"] for e in events] == [REPOSITORY, "engine", WHO, WHO, "engine"]
     text = json.dumps(events)
     for value in ("ghs_write", "ghs_read", "storage-token", "bws-write", world.bearer):
@@ -578,7 +593,7 @@ def gate_still(world: World, state: str) -> None:
 @then(parsers.parse('the approved fulfil runs, and the planning one ended "{state}"'))
 def resumed(world: World, state: str) -> None:
     fulfil, third = world.approvals.asks[world.fulfil.id], world.approvals.asks["third"]
-    assert fulfil.state == "done" and fulfil.needs == [{"need": "k8s.secret:s", "state": "ready"}]
+    assert fulfil.state == "done" and fulfil.needs == [{"need": "k8s.secret:s", "type": "k8s.secret", "grade": "auto", "state": "ready", "detail": "k8s.secret:s is ready"}]
     assert third.state == state and "restarted" in third.error
 
 
@@ -730,3 +745,67 @@ def press_approval_refused(world: World) -> None:
 def awaits_with_buttons(world: World) -> None:
     assert world.ask.state == "awaiting" and "Approve</button>" in _page(world).text
     assert any("its press's approval did not count" in line for line in world.lines)
+
+
+@given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?P<found>.+ graded .+)"),
+       target_fixture="world")
+def walked_graded(tmp_path: Path, found: str) -> World:
+    parts = re.findall(r'"([^"]+)" (\w+) graded (\w+)(?: detailing "([^"]+)")?', found)
+    w = World(tmp_path, needs={n: s for n, s, _, _ in parts})
+    w.runner.walk_prints(REPOSITORY, journal(states={n: s for n, s, _, _ in parts}, grades={n: g for n, _, g, _ in parts},
+                                             details={n: [d] for n, _, _, d in parts if d}), code=1)
+    w.engine.round()
+    w.held = False
+    w.bearer = ""
+    return w
+
+
+@then("the request never awaited an approval")
+def never_awaited(world: World) -> None:
+    assert "awaiting" not in [c["state"] for c in world.ask.changes]
+
+
+@then(parsers.parse('the journal\'s last event gives the reason and the needs {names}'))
+def last_event_needs(world: World, names: str) -> None:
+    last = world.storage.events()[-1]
+    assert last["reason"] == world.ask.error
+    assert [n["need"] for n in last["needs"]] == re.findall(r'"([^"]+)"', names)
+
+
+@then(parsers.re(r'the run\'s poll says "(?P<state>[^"]+)", giving the (?P<what>reason|note) "(?P<text>[^"]+)"'))
+def poll_with(world: World, state: str, what: str, text: str) -> None:
+    _poll(world, world.token())
+    result = world.answer.json()
+    assert result["state"] == state
+    assert text in result["result"]["error" if what == "reason" else "note"]
+
+
+@then(parsers.parse('the request ends "{state}" with the note "{text}"'))
+def ends_noted(world: World, state: str, text: str) -> None:
+    assert world.ask.state == state and text in world.ask.note, (world.ask.state, world.ask.note)
+
+
+@then(parsers.parse('the service page shows "{text}" beside the need'))
+def service_page_shows(world: World, text: str) -> None:
+    page = world.client.get(f"/services/{REPOSITORY}", headers=person()).text
+    assert f"<br><span class=why>{text}</span>" in page
+
+
+@then(parsers.parse('the run\'s poll lists the plan\'s need "{need}" as "{state}"'))
+def poll_plan(world: World, need: str, state: str) -> None:
+    _poll(world, world.token())
+    (entry,) = world.answer.json()["plan"]
+    assert (entry["need"], entry["state"]) == (need, state) and entry["change"].startswith("the fulfil makes it")
+
+
+@then(parsers.parse('the run\'s poll gives "{need}" as type "{kind}", grade "{grade}", state "{state}", found "{detail}"'))
+def poll_gives_need(world: World, need: str, kind: str, grade: str, state: str, detail: str) -> None:
+    _poll(world, world.token())
+    found = {n["need"]: n for n in world.answer.json()["result"]["needs"]}
+    assert found[need] == {"need": need, "type": kind, "grade": grade, "state": state, "detail": detail}
+
+
+@given(parsers.parse('the walk now finds "{need}" {state} detailing "{detail}"'))
+@when(parsers.parse('the walk now finds "{need}" {state} detailing "{detail}"'))
+def walk_now_finds(world: World, need: str, state: str, detail: str) -> None:
+    world.runner.walk_prints(REPOSITORY, journal(states={need: state}, details={need: [detail]}), code=1)
