@@ -102,7 +102,7 @@ class Live:
         w = self.world
         return Runs(w.approvals, Ledger(storage, head=HEAD, name="run.json"),
                     lambda runs: Executor(runs, spawn=self.spawn, lock_seconds=0.3, slice_=0.01),
-                    image="ghcr.io/example/engine:1", poll_ms=2000, log=w.lines.append, clock=lambda: w.now)
+                    image="registry.example/engine:1", poll_ms=2000, log=w.lines.append, clock=lambda: w.now)
 
     def compile(self) -> None:
         self.world.runner.machines[REPOSITORY] = Ran(0, json.dumps(machine(self.needs)), "")
@@ -432,7 +432,7 @@ def run_is(live: Live, state: str, mode: str, names: str) -> None:
     assert call == ["./pubdeploy", "machine", "--unit", "notifier", "--mode", mode]
     assert {n: x.state for n, x in run.needs.items()} == {n: "waiting" for n in re.findall(r'"([^"]+)"', names)}
     view = live.world.client.get(f"/runs/{run.id}", headers=person()).json()
-    assert view["request_id"] == run.id and view["image"] == "ghcr.io/example/engine:1"
+    assert view["request_id"] == run.id and view["image"] == "registry.example/engine:1"
     assert view["github_run_url"].endswith("/actions/runs/777") and view["plan_key"] == run.plan_key
 
 
