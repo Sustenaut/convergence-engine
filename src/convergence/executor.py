@@ -144,9 +144,11 @@ class Executor:
                 self.runs.transition(run, need.name, "found", said)
                 self.runs.transition(run, need.name, "fulfilling", "", run.approver or "engine")
                 state, said = self._walk(run, need, fulfil=True)
+                if state == "found":  # the fulfil ran and left it as it was: fulfilled, not ok
+                    self.runs.transition(run, need.name, "failed", f"still found after its fulfil: {said}", ok=False)
+                    return
                 if state not in ("failed", "stopped"):
                     self.runs.transition(run, need.name, "checking", said)
-                    state, said = (state, said) if state != "found" else ("failed", f"still found after its fulfil: {said}")
             self.runs.transition(run, need.name, state, said)
         except Exception as e:  # noqa: BLE001 - the need fails, said on the run; the others go on
             with self.runs.lock:

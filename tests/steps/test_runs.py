@@ -340,12 +340,39 @@ def second_run(live: Live) -> None:
 @when(parsers.parse('storage\'s record of the run says "{need}" went from "{frm}" to "{to}"'))
 def record_rewritten(live: Live, need: str, frm: str, to: str) -> None:
     document = live.runs.ledger.load()
-    for record in document["ended"]:
+    for record in [*document["ended"], *document["open"]]:
         if record["id"] == live.run.id:
             kept = [e for e in record["journal"] if e.get("need") != need]
             record["journal"] = [*kept, {"seq": len(kept) + 1, "need": need, "need_seq": 1, "from": frm, "to": to,
                                          "at": kept[-1]["at"], "by": "executor"}]
     live.runs.ledger.append(document)
+
+
+@then(parsers.parse('"{need}" failed by its machine\'s event "{event}", not ok, saying "{said}"'))
+def failed_not_ok(live: Live, need: str, event: str, said: str) -> None:
+    (last,) = [e for e in live.run.journal if e.get("need") == need and e["to"] == "failed"]
+    assert last["from"] == "fulfilling" and last["event"] == event and last["ok"] is False, last
+    assert said in last["result"], last
+
+
+@then(parsers.parse('the new pod\'s request ended "{state}", saying "{said}"'))
+def new_pod_request(live: Live, state: str, said: str) -> None:
+    ask = live.world.approvals.asks[live.run.id]
+    assert ask.state == state and said in ask.error, (ask.state, ask.error)
+
+
+@then(parsers.parse('approving its request now is refused, the request being "{state}"'))
+def approve_request_now(live: Live, state: str) -> None:
+    refused = live.world.approvals.decide(live.run.id, WHO, True)  # its run is not in this pod's runs
+    assert f"that request is {state}" in refused, refused
+
+
+@then(parsers.parse("approving the run now answers {status:d}"))
+def approve_now(live: Live, status: int) -> None:
+    _bind(live, live.runs)  # the new pod's page
+    answer = live.world.client.post(f"/runs/{live.run.id}/approve", json={"plan_key": live.run.plan_key},
+                                    headers=person())
+    assert answer.status_code == status, answer.text
 
 
 @then("the new pod leaves the run out, and its log says so")

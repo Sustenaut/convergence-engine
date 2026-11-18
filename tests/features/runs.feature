@@ -41,6 +41,7 @@ Feature: Live runs, need by need
     And the person approves the run
     Then the run ends "failed" with "k8s.secret:a" failed, "k8s.secret:b" blocked
     And the request ended "failed", saying "not ready: k8s.secret:a failed, k8s.secret:b blocked"
+    And "k8s.secret:a" failed by its machine's event "fulfilled", not ok, saying "still found after its fulfil"
 
   Scenario: Stop before approval declines the run
     Given the live needs "k8s.secret:a" missing
@@ -129,6 +130,16 @@ Feature: Live runs, need by need
     And a new pod starts the runs from storage
     Then the new pod leaves the run out, and its log says so
 
+  Scenario: A run awaiting approval that its machine does not replay ends its request failed, and Approve is refused
+    Given the live needs "k8s.secret:a" missing
+    When a GitHub run asks for a live fulfil
+    And storage's record of the run says "k8s.secret:a" went from "waiting" to "ready"
+    And a new pod starts the runs from storage
+    Then the new pod leaves the run out, and its log says so
+    And the new pod's request ended "failed", saying "its run's record does not replay in its machine"
+    And approving its request now is refused, the request being "failed"
+    And approving the run now answers 404
+
   Scenario: What a run shows holds no email and no link, and an ended run may be kept
     Given the live needs "k8s.secret:a" missing
     And the check of "k8s.secret:a" finds it ready, saying "ask someone@example.org at https://example.org/x?t=1"
@@ -144,6 +155,13 @@ Feature: Live runs, need by need
     Then the run ends "done" with "k8s.secret:a" found, "k8s.secret:b" ready
     And nothing was fulfilled
     And the request ended "done"
+
+  Scenario: A need pubdeploy's machine does not fulfil ends found, though its mode is fulfil
+    Given the live needs "k8s.secret:a" missing, "dns.site:d" missing graded propose
+    When a GitHub run asks for a live fulfil
+    And the person approves the run
+    Then the run ends "done" with "k8s.secret:a" ready, "dns.site:d" found
+    And "dns.site:d" was never fulfilled
 
   Scenario Outline: A live fulfil with nothing the engine can fulfil ends as an inline one does
     Given the live needs <needs>
