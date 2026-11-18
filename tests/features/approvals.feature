@@ -396,3 +396,7 @@ Feature: Requests a person approves first
     And the request's plan has been walked
     Then the run's poll gives "k8s.secrets-declared:notifier" as type "k8s.secrets-declared", grade "none", state "drift", found "ask [someone], see [link]"
     And the request's page says "someone@example.org"
+
+  Scenario: The poll answer says when an awaiting request expires
+    Given a GitHub run asked for a gate with the plan "x"
+    Then the run's poll says it expires 24 hours after it was asked

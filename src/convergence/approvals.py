@@ -496,6 +496,7 @@ class Approvals:
         and an email stays on the page and in the journal."""
         return {"id": ask.id, "kind": ask.kind, "state": ask.state, "repository": ask.repository, "unit": ask.unit,
                 "plan_sha256": ask.plan_sha256, "url": f"{site}/approvals/{ask.id}",
+                "expires_at": _iso(ask.expires_at),  # when an awaiting request expires undecided
                 # The plan's needs by name, state and what the fulfil changes, so a caller can say
                 # what awaits approval; a gate's plan text stays on the page. What may leave the
                 # engine for a public log has no email and no link (public()).
