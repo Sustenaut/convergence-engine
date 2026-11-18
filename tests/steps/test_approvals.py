@@ -811,9 +811,13 @@ def walk_now_finds(world: World, need: str, state: str, detail: str) -> None:
     world.runner.walk_prints(REPOSITORY, journal(states={need: state}, details={need: [detail]}), code=1)
 
 
-@then("the run's poll says it expires 24 hours after it was asked")
+@when("the run polls it")
+def run_polls(world: World) -> None:
+    _poll(world, world.token())
+
+
+@then("its poll answer says it expires 24 hours after it was asked")
 def poll_expires(world: World) -> None:
     import time as clock  # noqa: PLC0415
-    _poll(world, world.token())
     expected = clock.strftime("%Y-%m-%dT%H:%M:%SZ", clock.gmtime(world.ask.created_at + 24 * 3600))
     assert world.answer.json()["expires_at"] == expected

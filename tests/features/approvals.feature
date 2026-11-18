@@ -399,4 +399,5 @@ Feature: Requests a person approves first
 
   Scenario: The poll answer says when an awaiting request expires
     Given a GitHub run asked for a gate with the plan "x"
-    Then the run's poll says it expires 24 hours after it was asked
+    When the run polls it
+    Then its poll answer says it expires 24 hours after it was asked
