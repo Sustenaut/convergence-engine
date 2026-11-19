@@ -1,16 +1,16 @@
 """Google credentials for the walks' gcloud, without a key (step 4c).
 
-The pod has two projected Kubernetes tokens for Google, told apart by their audience:
-one every round may use, and one only a person's Fulfil gets. Each is traded at
-Google's STS for a short-lived credential of its own account, through the Workload
-Identity pool shared-infra's infra/convergence-keys.tf makes: the read token's for
-convergence-key-reader, which may list keys, the write token's for
-convergence-key-admin, which may create them.
+The pod has a projected Kubernetes token for Google, audience convergence-google-read,
+traded at Google's STS for a short-lived credential of convergence-key-reader through
+the Workload Identity pool shared-infra's infra/convergence-keys.tf makes. The reader
+views the project: the services' accounts, their keys and their Workload Identity
+bindings. No walk makes a Google key (the services hold none), so there is no write
+path.
 
 gcloud does the exchange itself from a credential file (external_account), which holds
 no secret: the pool's provider, the account, and the token's path. The engine writes
-one per path at start, and gives each walk its path's file and a gcloud configuration
-directory of its own, so a round never finds a token a Fulfil's gcloud cached.
+it at start, and gives each walk the file and the path's gcloud configuration
+directory.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ IMPERSONATE = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccoun
 @dataclass(frozen=True)
 class Path_:
     """One path's provider, account and projected token file."""
-    name: str  # read or write
+    name: str  # read
     provider: str  # projects/N/locations/global/workloadIdentityPools/P/providers/NAME
     account: str
     token_file: Path

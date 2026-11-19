@@ -82,8 +82,6 @@ spec:
               value: projects/948171295184/locations/global/workloadIdentityPools/convergence
             - name: CONVERGENCE_GOOGLE_READER
               value: convergence-key-reader@sustenaut.iam.gserviceaccount.com
-            - name: CONVERGENCE_GOOGLE_ADMIN
-              value: convergence-key-admin@sustenaut.iam.gserviceaccount.com
             # Requests (approvals.py): the ServiceAccounts that may ask for a gate, checked
             # with the cluster's TokenReview (admin/token-review.yaml). GitHub runs of
             # CONVERGENCE_REQUEST_OWNERS' repositories (Sustenaut) need no setting.
@@ -108,9 +106,6 @@ spec:
               readOnly: true
             - name: google-read
               mountPath: /var/run/secrets/google-read
-              readOnly: true
-            - name: google-write
-              mountPath: /var/run/secrets/google-write
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
@@ -162,12 +157,5 @@ spec:
             sources:
               - serviceAccountToken:
                   audience: convergence-google-read
-                  path: token
-                  expirationSeconds: 3600
-        - name: google-write
-          projected:
-            sources:
-              - serviceAccountToken:
-                  audience: convergence-google-write
                   path: token
                   expirationSeconds: 3600
