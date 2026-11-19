@@ -79,17 +79,14 @@ class Engine:
         self.google = self._google()
 
     def _google(self) -> dict[str, tuple[tuple[str, str], ...]]:
-        """Each path's gcloud environment (google.py): read for rounds, write for a Fulfil."""
+        """The read path's gcloud environment (google.py), which every walk gets: no walk
+        makes a Google key, so a Fulfil has no path of its own."""
         s = self.settings
-        if not (s.google_pool and s.google_reader and s.google_admin):
+        if not (s.google_pool and s.google_reader):
             return {}
         from .google import Path_, prepare as google_prepare
         made = google_prepare(s.work, [Path_("read", f"{s.google_pool}/providers/read", s.google_reader,
-                                             s.google_read_token),
-                                       Path_("write", f"{s.google_pool}/providers/write", s.google_admin,
-                                             s.google_write_token)])
-        # A key the admin may not make: pubsec's fix names where its accounts are granted.
-        made["write"]["PUBSEC_GCP_KEYS_GRANTED_IN"] = "Sustenaut/shared-infra's infra/convergence-keys.tf"
+                                             s.google_read_token)])
         return {k: tuple(sorted(v.items())) for k, v in made.items()}
 
     def walking(self, repository: str) -> threading.Lock:
@@ -214,8 +211,7 @@ class Engine:
         write = self.settings.bitwarden_write_token
         credentials = dataclasses.replace(
             self.credentials(), github_token=self.fulfil_token(),
-            write_token_file=str(write) if write and write.is_file() else "",
-            google=self.google.get("write", ()))
+            write_token_file=str(write) if write and write.is_file() else "")
         clone = self.clones.refresh(repository, credentials.github_token)
         self.log(f"convergence: {repository} {unit}: fulfil approved by {actor}")
         result = self.walker(repository, clone, self._zones_of(repository), self.settings.storage_url, credentials,
@@ -263,8 +259,7 @@ class Engine:
             write = self.settings.bitwarden_write_token
             credentials = dataclasses.replace(
                 credentials, github_token=self.fulfil_token(),
-                write_token_file=str(write) if write and write.is_file() else "",
-                google=self.google.get("write", ()))
+                write_token_file=str(write) if write and write.is_file() else "")
         clone = self.clones.refresh(repository, credentials.github_token)
         command = ["./pubdeploy", "walk", "--unit", unit, "--need", need, "--budget-seconds", f"{budget:g}",
                    *(["--fulfil", "--yes"] if fulfil else []), "--json", "--journal", self.settings.storage_url]

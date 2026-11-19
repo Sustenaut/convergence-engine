@@ -125,17 +125,16 @@ Feature: A person's Fulfil
     And the answer includes "the journal refused it"
     And no Fulfil walk ran
 
-  Scenario: A round gets the read paths google credential alone
+  Scenario: A round gets the read path's google credential
     Given the engine with a Google pool
     When it walks Sustenaut/notifier
     Then the walk's Google credential is the read path's
     And the result's "CLOUDSDK_CORE_DISABLE_USAGE_REPORTING" is "true"
-    And the result does not include "PUBSEC_GCP_KEYS_GRANTED_IN"
 
-  Scenario: A fulfil gets the write paths google credential and its own gcloud directory
+  Scenario: A fulfil gets the same read path, since no walk makes a Google key
     Given the engine with a Google pool has walked Sustenaut/notifier
     When the person presses Fulfil for the unit "notifier" and the walk makes it ready
-    Then the fulfil got the write paths google credential and its own gcloud directory
+    Then the fulfil got the read path's google credential
 
   Scenario: Without a pool no walk gets a google credential
     Given the engine

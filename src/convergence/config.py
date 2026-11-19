@@ -45,9 +45,7 @@ class Settings:
     # its accounts and the pod's two projected tokens; no pool, no Google credential.
     google_pool: str = ""
     google_reader: str = ""
-    google_admin: str = ""
     google_read_token: Path | None = None
-    google_write_token: Path | None = None
     # Requests (approvals.py): the site, which is a caller's token's audience too, how long one
     # awaits a decision, the owners whose GitHub runs may ask, and the ServiceAccounts
     # (NAMESPACE:NAME) that may ask for a gate.
@@ -104,9 +102,7 @@ def settings(env: Mapping[str, str]) -> Settings:
         fulfil_seconds=int(env.get("CONVERGENCE_FULFIL_SECONDS", "1200")),
         google_pool=env.get("CONVERGENCE_GOOGLE_POOL", ""),
         google_reader=env.get("CONVERGENCE_GOOGLE_READER", ""),
-        google_admin=env.get("CONVERGENCE_GOOGLE_ADMIN", ""),
         google_read_token=Path(env.get("CONVERGENCE_GOOGLE_READ_TOKEN_FILE", "/var/run/secrets/google-read/token")),
-        google_write_token=Path(env.get("CONVERGENCE_GOOGLE_WRITE_TOKEN_FILE", "/var/run/secrets/google-write/token")),
         site=env.get("CONVERGENCE_SITE", "https://convergence.sustenaut.eu").rstrip("/"),
         request_hours=hours, request_owners=owners, requesters=requesters,
         run_poll_ms=int(env.get("CONVERGENCE_RUN_POLL_MS", "2000")), image=env.get("CONVERGENCE_IMAGE", ""))

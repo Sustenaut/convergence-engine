@@ -146,12 +146,11 @@ Feature: The services, and the engine's settings
 
       """
 
-  Scenario: The Google pool and the pod's two token files are settings
+  Scenario: The Google pool and the pod's token file are settings
     Given the setting CONVERGENCE_GOOGLE_POOL is "projects/1/locations/global/workloadIdentityPools/convergence"
     When the settings are read
     Then the result's "google_pool" is "projects/1/locations/global/workloadIdentityPools/convergence"
     And the result's "google_read_token" is "/var/run/secrets/google-read/token"
-    And the result's "google_write_token" is "/var/run/secrets/google-write/token"
 
   Scenario: Requests have their own settings
     Given the setting CONVERGENCE_REQUESTERS is "integrations:app, notifier:app"

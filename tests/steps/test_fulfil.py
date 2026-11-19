@@ -89,8 +89,7 @@ POOL = "projects/1/locations/global/workloadIdentityPools/convergence"
 def _google(w: World, tmp_path: Path) -> World:
     w.engine.settings = dataclasses.replace(
         w.engine.settings, google_pool=POOL, google_reader="reader@p.iam.gserviceaccount.com",
-        google_admin="admin@p.iam.gserviceaccount.com", google_read_token=tmp_path / "gread",
-        google_write_token=tmp_path / "gwrite")
+        google_read_token=tmp_path / "gread")
     w.engine.google = w.engine._google()  # noqa: SLF001
     return w
 
@@ -358,25 +357,24 @@ def posts_fulfil(ctx, world: World, asker: str, form: str) -> None:
                                                    headers=ASKERS[asker]))
 
 
-@then("the walk's Google credential is the read path's")
-def google_read(ctx, tmp_path: Path) -> None:
-    env = ctx.result
+def _read_path(env: dict, tmp_path: Path) -> None:
     read = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
     assert read["audience"] == f"//iam.googleapis.com/{POOL}/providers/read"
     assert read["credential_source"] == {"file": str(tmp_path / "gread")}
     assert "reader@p.iam.gserviceaccount.com" in read["service_account_impersonation_url"]
     assert env["CLOUDSDK_CONFIG"] == str(tmp_path / "google" / "read" / "gcloud")
-    assert "gwrite" not in json.dumps(env) and "admin@" not in json.dumps(env)
+    assert "google/write" not in json.dumps(env) and "PUBSEC_GCP_KEYS_GRANTED_IN" not in env
 
 
-@then("the fulfil got the write paths google credential and its own gcloud directory")
-def the_fulfil_got_the_write_path(world: World, tmp_path: Path) -> None:
+@then("the walk's Google credential is the read path's")
+def google_read(ctx, tmp_path: Path) -> None:
+    _read_path(ctx.result, tmp_path)
+
+
+@then("the fulfil got the read path's google credential")
+def the_fulfil_got_the_read_path(world: World, tmp_path: Path) -> None:
     (env,) = world.walk_envs(fulfil=True)
-    write = json.loads(Path(env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]).read_text())
-    assert write["audience"].endswith("/providers/write")
-    assert write["credential_source"] == {"file": str(tmp_path / "gwrite")}
-    assert env["CLOUDSDK_CONFIG"] == str(tmp_path / "google" / "write" / "gcloud")
-    assert env["PUBSEC_GCP_KEYS_GRANTED_IN"].endswith("infra/convergence-keys.tf")
+    _read_path(env, tmp_path)
 
 
 @then(parsers.parse('the result has no key starting "{prefix}"'))
