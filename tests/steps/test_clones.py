@@ -1,18 +1,18 @@
-"""Steps for the clones (real git, on a local server), the walk's subprocess, and facts."""
+"""Steps for the clones (real git, on pubtest's bare remotes), the walk's subprocess, and facts."""
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shlex
-import subprocess
 from pathlib import Path
 
-import pytest
+from pubtest.steps.git import git
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence import clones as clones_module
 from convergence import facts
-from convergence.clones import CloneFailed, Clones, Ran, git_env, run
+from convergence.clones import Clones, Ran, git_env, run
 from convergence.journals import head
 from convergence.walker import Credentials, walk
 
@@ -23,161 +23,88 @@ scenarios("../features/clones.feature")
 TOKEN = "ghs_secret_installation"
 
 
-def git(*args: str, cwd: Path) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-                        "GIT_COMMITTER_EMAIL": "t@t"})
-
-
-@pytest.fixture
-def ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    return {"tmp": tmp_path, "monkeypatch": monkeypatch}
-
-
-@given(parsers.parse('a repository {slug} on a local git server, with pubrules.json "{text}"'))
-def local_server(ctx: dict, slug: str, text: str) -> None:
-    server = ctx["tmp"] / "server"
-    source = ctx["tmp"] / "source"
-    source.mkdir()
-    git("init", "-q", "-b", "main", cwd=source)
-    (source / "pubrules.json").write_text(text)
-    git("add", ".", cwd=source)
-    git("commit", "-qm", "one", cwd=source)
-    (server / slug).parent.mkdir(parents=True)
-    git("clone", "-q", "--bare", str(source), str(server / f"{slug}.git"), cwd=ctx["tmp"])
-    ctx["source"] = source
-    ctx["monkeypatch"].setattr(clones_module, "GITHUB", f"file://{server}")
-    ctx["clones"] = Clones(ctx["tmp"] / "work")
+@given("the engine clones from the bare remotes")
+def clones_from_remotes(ctx, tmp_path: Path, monkeypatch) -> None:
+    # pubtest's `a bare remote "OWNER/NAME"` keeps it at pubtest-remotes/OWNER/NAME.git, as GitHub's URL has it.
+    monkeypatch.setattr(clones_module, "GITHUB", f"file://{tmp_path / 'pubtest-remotes'}")
+    ctx.clones = Clones(ctx.directory / "work")
 
 
 @when(parsers.parse("the engine refreshes its clone of {slug}"))
-def refresh(ctx: dict, slug: str) -> None:
-    clones = ctx.get("clones") or Clones(ctx["tmp"] / "work", ctx["runner"], {})
-    try:
-        ctx["clone"] = clones.refresh(slug, TOKEN)
-    except CloneFailed as e:
-        ctx["error"] = str(e)
+def refresh(ctx, tmp_path: Path, slug: str) -> None:
+    clones = getattr(ctx, "clones", None) or Clones(tmp_path / "work", ctx.runner, {})
+    ctx.attempt(lambda: clones.refresh(slug, TOKEN))
 
 
-@then(parsers.parse('the clone\'s pubrules.json is "{text}"'))
-def clone_has(ctx: dict, text: str) -> None:
-    assert (ctx["clone"] / "pubrules.json").read_text() == text
-
-
-@when(parsers.parse('the repository\'s pubrules.json becomes "{text}" and a stray file is left in the clone'))
-def change(ctx: dict, text: str) -> None:
-    (ctx["source"] / "pubrules.json").write_text(text)
-    git("commit", "-qam", "two", cwd=ctx["source"])
-    git("push", "-q", str(next((ctx["tmp"] / "server").rglob("*.git"))), "main",
-        cwd=ctx["source"])
-    (ctx["clone"] / "stray").write_text("x")
-
-
-@then("the stray file is gone")
-def stray_gone(ctx: dict) -> None:
-    assert not (ctx["clone"] / "stray").exists()
-
-
-@then("no file in the clone holds the token")
-def no_token(ctx: dict) -> None:
-    for path in ctx["clone"].rglob("*"):
-        if path.is_file():
-            assert TOKEN.encode() not in path.read_bytes(), path
+@when(parsers.parse('the change is pushed to "{remote}"'))
+def pushed(ctx, remote: str) -> None:
+    ctx.attempt(lambda: (git(ctx, "commit", "-qam", "two"), git(ctx, "push", "-q", remote, "HEAD")))
 
 
 @when(parsers.parse('git\'s environment is made for the token "{token}"'))
-def make_env(ctx: dict, token: str) -> None:
-    ctx["env"] = git_env(token, {"PATH": "/bin"})
-
-
-@then(parsers.parse('it sends "{header}" to github.com'))
-def sends(ctx: dict, header: str) -> None:
-    assert ctx["env"]["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
-    assert ctx["env"]["GIT_CONFIG_VALUE_0"] == header
-
-
-@then("it never prompts")
-def never_prompts(ctx: dict) -> None:
-    assert ctx["env"]["GIT_TERMINAL_PROMPT"] == "0"
+def make_env(ctx, token: str) -> None:
+    ctx.attempt(lambda: git_env(token, {"PATH": "/bin"}))
 
 
 @when(parsers.parse('the engine runs "{command}" for at most 1 second'))
-def runs(ctx: dict, command: str) -> None:
-    ctx["ran"] = run(shlex.split(command), ctx["tmp"], {"PATH": os.environ["PATH"]}, 1)
-
-
-@then(parsers.re(r'it ended with (?P<code>\d+) and said "(?P<said>.*)"$'))
-def ended(ctx: dict, code: str, said: str) -> None:
-    assert ctx["ran"].code == int(code) and ctx["ran"].stderr == said
+def runs(ctx, tmp_path: Path, command: str) -> None:
+    ctx.attempt(lambda: dataclasses.asdict(run(shlex.split(command), tmp_path, {"PATH": os.environ["PATH"]}, 1)))
 
 
 @given(parsers.parse("git fails silently with {code:d}"))
-def git_silent(ctx: dict, code: int) -> None:
-    ctx["runner"] = lambda argv, cwd, env, timeout: Ran(code, "", "")
-
-
-@then(parsers.parse('the refresh fails with "{text}"'))
-def refresh_fails(ctx: dict, text: str) -> None:
-    assert ctx["error"] == text
+def git_silent(ctx, code: int) -> None:
+    ctx.runner = lambda argv, cwd, env, timeout: Ran(code, "", "")
 
 
 @given(parsers.parse("a clone of {slug} without ./pubdeploy"))
-def without_pubdeploy(ctx: dict, slug: str) -> None:
-    ctx["clone"] = ctx["tmp"] / slug
-    ctx["clone"].mkdir(parents=True)
-    ctx["slug"] = slug
+def without_pubdeploy(ctx, tmp_path: Path, slug: str) -> None:
+    ctx.clone = tmp_path / slug
+    ctx.clone.mkdir(parents=True)
+    ctx.slug = slug
 
 
 @given(parsers.parse("a clone of {slug} whose walk prints '{text}'"))
-def walk_prints(ctx: dict, slug: str, text: str) -> None:
-    without_pubdeploy(ctx, slug)
-    (ctx["clone"] / "pubdeploy").write_text("")
-    ctx["runner"] = lambda argv, cwd, env, timeout: Ran(0, text, "")
+def walk_prints(ctx, tmp_path: Path, slug: str, text: str) -> None:
+    without_pubdeploy(ctx, tmp_path, slug)
+    (ctx.clone / "pubdeploy").write_text("")
+    ctx.runner = lambda argv, cwd, env, timeout: Ran(0, text, "")
 
 
 @when("it is walked")
-def walked(ctx: dict) -> None:
-    ctx["walk"] = walk(ctx["slug"], ctx["clone"], None, "https://storage.test", Credentials("g", "s"), base={},
-                       cache=ctx["tmp"], timeout=5, runner=ctx.get("runner", run))
-
-
-@then(parsers.parse('the walk failed with "{text}"'))
-def walk_failed(ctx: dict, text: str) -> None:
-    assert not ctx["walk"].ok and ctx["walk"].error == text
+def walked(ctx, tmp_path: Path) -> None:
+    ctx.attempt(lambda: walk(ctx.slug, ctx.clone, None, "https://storage.test", Credentials("g", "s"), base={},
+                             cache=tmp_path, timeout=5, runner=getattr(ctx, "runner", run)))
 
 
 @given(parsers.parse('a journal of {slug} with "{a}" {sa} and "{b}" {sb}'))
-def a_journal(ctx: dict, slug: str, a: str, sa: str, b: str, sb: str) -> None:
-    ctx["document"] = journal(slug, slug.split("/")[1], {a: sa, b: sb})
+def a_journal(ctx, slug: str, a: str, sa: str, b: str, sb: str) -> None:
+    ctx.document = journal(slug, slug.split("/")[1], {a: sa, b: sb})
 
 
 @when("its facts are made")
-def make_facts(ctx: dict) -> None:
-    ctx["rows"] = facts.rows([ctx["document"]])
-    ctx["data"] = facts.encode(ctx["rows"])
+def make_facts(ctx) -> None:
+    ctx.attempt(lambda: facts.rows([ctx.document]))
 
 
-@then(parsers.parse('there are {count:d} rows, and "{need}" is {state}, observed at the walk\'s start'))
-def rows_are(ctx: dict, count: int, need: str, state: str) -> None:
-    rows = {r["need"]: r for r in ctx["rows"]}
-    assert len(ctx["rows"]) == count and rows[need]["state"] == state
-    assert rows[need]["observed_at"] == rows[need]["walk_started_at"]
+@when("its facts are made into a file")
+def make_file(ctx) -> None:
+    ctx.rows = facts.rows([ctx.document])
+    ctx.attempt(lambda: facts.encode(ctx.rows))
 
 
 @then("the file decodes to the same rows, and the same rows make the same file")
-def round_trip(ctx: dict) -> None:
-    assert facts.decode(ctx["data"]) == ctx["rows"]
-    assert facts.encode(list(ctx["rows"])) == ctx["data"]
+def round_trip(ctx) -> None:
+    assert facts.decode(ctx.result) == ctx.rows
+    assert facts.encode(list(ctx.rows)) == ctx.result
 
 
-@then(parsers.parse('its place is "{prefix}"'))
-def its_place(ctx: dict, prefix: str) -> None:
-    service = ctx["document"]["service"]
-    place = facts.place(service["repository"], service["unit"], ctx["document"]["walk"]["started_at"], ctx["data"])
-    assert place.startswith(prefix) and place.endswith(".avro")
+@when("its facts' place is found")
+def its_place(ctx) -> None:
+    service = ctx.document["service"]
+    data = facts.encode(facts.rows([ctx.document]))
+    ctx.attempt(lambda: facts.place(service["repository"], service["unit"], ctx.document["walk"]["started_at"], data))
 
 
-@then("head names are flat lower case and short")
-def head_names_are_flat_lower_case_and_short() -> None:
-    assert head("Sustenaut/release-controlplane", "release-schryer") == "sustenaut.release-controlplane.release-schryer"
-    assert head("Some_Owner/Repo", "U" * 80) == ("some_owner.repo." + "u" * 80)[:64]
+@when(parsers.parse('the head of "{repository}" unit "{unit}" is named'))
+def head_named(ctx, repository: str, unit: str) -> None:
+    ctx.attempt(lambda: head(repository, unit))

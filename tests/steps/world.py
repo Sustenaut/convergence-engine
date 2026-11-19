@@ -11,6 +11,8 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi.testclient import TestClient
+from pubtest.core import Result
+from pubtest.http import Answer
 
 from convergence.approvals import Approvals, Ledger
 from convergence.callers import Callers, GitHubOIDC, TokenReview
@@ -146,3 +148,25 @@ def person(who: str = WHO, role: bool = True, origin: str | None = SITE) -> dict
     if origin:
         headers["Origin"] = origin
     return headers
+
+
+def answer_of(response) -> Answer:
+    """A test client's response, as pubtest's HTTP steps read an answer."""
+    return Answer(response.status_code, dict(response.headers), response.content)
+
+
+def answered(ctx, response):
+    """Keep a request a suite's own When sent as the scenario's answer, for pubtest's answer steps."""
+    ctx.acting()
+    ctx.answer = answer_of(response)
+    ctx.ran(Result(value=ctx.answer))
+    return response
+
+
+def client_of(world) -> callable:
+    """pubtest's http_client: a request to the world's app, its redirects not followed."""
+
+    def send(method: str, path: str, headers, body: bytes | None) -> Answer:
+        return answer_of(world.client.request(method, path, headers=dict(headers), content=body,
+                                              follow_redirects=False))
+    return send

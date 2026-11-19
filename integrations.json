@@ -12,6 +12,7 @@
     {
       "plugin": "github.actions-oidc",
       "paths": [
+        ".github/workflows/service-needs.yml",
         "src/convergence/callers.py"
       ],
       "mode": "required"

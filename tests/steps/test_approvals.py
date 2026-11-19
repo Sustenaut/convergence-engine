@@ -9,18 +9,17 @@ import re
 from html import unescape
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence.approvals import Approvals, Ask, Ledger
-from convergence.callers import GitHubOIDC, Refused, Requester, jwks_from
+from convergence.callers import GitHubOIDC, Requester, jwks_from
 from convergence.clones import Ran
 from convergence.journals import Journals
 from convergence.page import create_app
 
 from .fakes import Storage, journal
-from .world import ISSUER, REPOSITORY, SA_TOKEN, SITE, WHO, World, cluster_token, person
+from .world import REPOSITORY, SA_TOKEN, SITE, WHO, World, answered, cluster_token, person
 
 scenarios("approvals.feature")
 
@@ -30,8 +29,9 @@ def _states(found: str) -> dict[str, str]:
 
 
 @given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?!.* graded )(?P<found>.+)"), target_fixture="world")
-def walked(tmp_path: Path, found: str) -> World:
+def walked(ctx, tmp_path: Path, found: str) -> World:
     w = World(tmp_path, needs=_states(found))
+    w.ctx = ctx
     w.engine.round()
     w.held = False
     w.bearer = ""
@@ -43,8 +43,9 @@ def walked(tmp_path: Path, found: str) -> World:
 
 def _post(world: World, bearer: str, body, raw: bytes | None = None):
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {}
-    world.answer = world.client.post("/requests", content=raw if raw is not None else json.dumps(body),
-                                     headers={**headers, "Content-Type": "application/json"})
+    world.answer = answered(world.ctx, world.client.post(
+        "/requests", content=raw if raw is not None else json.dumps(body),
+        headers={**headers, "Content-Type": "application/json"}))
     if world.answer.status_code == 201:
         world.ask = world.approvals.asks[world.answer.json()["id"]]
         world.bearer = bearer
@@ -89,8 +90,9 @@ def run_asks_check(world: World, unit: str) -> None:
 
 
 @given("the engine without a write token has walked Sustenaut/notifier", target_fixture="world")
-def walked_no_write(tmp_path: Path) -> World:
+def walked_no_write(ctx, tmp_path: Path) -> World:
     w = World(tmp_path, fulfil=False)
+    w.ctx = ctx
     w.engine.round()
     w.held, w.bearer = False, ""
     return w
@@ -144,11 +146,6 @@ def answer_and_state(world: World, status: int, state: str) -> None:
     assert world.answer.headers["Cache-Control"] == "private, no-store"
 
 
-@then(parsers.re(r'the answer is (?P<status>\d+) refusing "(?P<reason>[^"]+)"'), converters={"status": int})
-def answer_refusing(world: World, status: int, reason: str) -> None:
-    assert (world.answer.status_code, world.answer.json()) == (status, {"refused": reason})
-
-
 @then("the request records the run's repository, sha, workflow and run")
 def records_the_run(world: World) -> None:
     r = world.ask.requester
@@ -198,36 +195,51 @@ def keys_down(world: World) -> None:
     world.callers.github.fetch = down
 
 
-@then("the keys are fetched through the caller, and a refusal lets no one in")
-def keys_through_caller(world: World) -> None:
-    class Caller:
-        def __init__(self, ok):
-            self.ok, self.asked = ok, []
+class KeysCaller:
+    """The engine's Caller, as GitHub's keys come through it: what it was asked, and its answer."""
 
-        def call(self, plugin, operation, request):
-            self.asked.append((plugin, operation, request.url))
-            ok = self.ok
+    def __init__(self, world: World, ok: bool) -> None:
+        self.world, self.ok, self.asked = world, ok, []
 
-            class Answer:
-                status = 200 if ok else 503
+    def call(self, plugin, operation, request):
+        self.asked.append(f"{plugin} {operation} {request.url}")
+        caller = self
 
-                def __init__(self):
-                    self.ok = ok
+        class Answer:
+            status = 200 if caller.ok else 503
+            ok = caller.ok
 
-                def json(self):
-                    return world.keys.jwks
-            return Answer()
-    good = Caller(True)
-    oidc = GitHubOIDC(jwks_from(good), SITE, ("Sustenaut",), clock=lambda: world.now)
-    assert oidc.verify(world.token()).repository == REPOSITORY
-    assert good.asked == [("github.actions-oidc", "identity", f"{ISSUER}/.well-known/jwks")]
-    with pytest.raises(Refused) as e:
-        oidc.verify(world.token(iss="https://elsewhere.example"))
-    assert e.value.reason == "wrong-issuer"
-    refused = GitHubOIDC(jwks_from(Caller(False)), SITE, ("Sustenaut",), clock=lambda: world.now)
-    with pytest.raises(Refused) as e:
-        refused.verify(world.token())
-    assert (e.value.status, e.value.reason) == (503, "keys-unavailable")
+            def json(self):
+                return caller.world.keys.jwks
+        return Answer()
+
+
+@given("GitHub's keys come through the engine's caller")
+def keys_caller(world: World) -> None:
+    world.keys_caller = KeysCaller(world, True)
+
+
+@given("GitHub's keys come through the engine's caller, which is refused")
+def keys_caller_refused(world: World) -> None:
+    world.keys_caller = KeysCaller(world, False)
+
+
+@when(parsers.re(r'a GitHub run\'s token(?: of the issuer "(?P<issuer>[^"]+)")? is verified'))
+def token_verified(ctx, world: World, issuer: str | None) -> None:
+    oidc = GitHubOIDC(jwks_from(world.keys_caller), SITE, ("Sustenaut",), clock=lambda: world.now)
+    token = world.token(iss=issuer) if issuer else world.token()
+    ctx.attempt(lambda: oidc.verify(token))
+
+
+@then(parsers.parse('the caller was asked once, for "{what}"'))
+def caller_asked(world: World, what: str) -> None:
+    assert world.keys_caller.asked == [what]
+
+
+@then(parsers.parse('the refusal\'s "{key}" is "{wanted}"'))
+def refusal_key(ctx, key: str, wanted: str) -> None:
+    assert ctx.refused is not None, "it was not refused"
+    assert str(getattr(ctx.refused.error, key)) == wanted, ctx.refused.error.__dict__
 
 
 BODIES = {"a request of another kind": {"kind": "deploy"},
@@ -288,7 +300,8 @@ def no_callers(world: World) -> None:
 
 
 def _poll(world: World, bearer: str, id_: str | None = None) -> None:
-    world.answer = world.client.get(f"/requests/{id_ or world.ask.id}", headers={"Authorization": f"Bearer {bearer}"})
+    world.answer = answered(world.ctx, world.client.get(f"/requests/{id_ or world.ask.id}",
+                                                        headers={"Authorization": f"Bearer {bearer}"}))
 
 
 @then(parsers.re(r'the run\'s poll says "(?P<state>[^"]+)"(?: with (?P<found>.*))?'))
@@ -325,7 +338,8 @@ def nothing_walked(world: World) -> None:
 
 
 def _page(world: World, headers: dict | None = None, id_: str | None = None):
-    world.answer = world.client.get(f"/approvals/{id_ or world.ask.id}", headers=headers or person())
+    world.answer = answered(world.ctx, world.client.get(f"/approvals/{id_ or world.ask.id}",
+                                                        headers=headers or person()))
     return world.answer
 
 
@@ -337,8 +351,8 @@ def _form(world: World) -> dict[str, str]:
 def _decide(world: World, decision: str, headers: dict | None = None, form: dict | None = None,
             id_: str | None = None) -> None:
     data = {**(form if form is not None else _form(world)), "decision": decision}
-    world.answer = world.client.post(f"/approvals/{id_ or world.ask.id}", data=data, headers=headers or person(),
-                                     follow_redirects=False)
+    world.answer = answered(world.ctx, world.client.post(f"/approvals/{id_ or world.ask.id}", data=data,
+                                                         headers=headers or person(), follow_redirects=False))
     world.wait()
 
 
@@ -542,22 +556,12 @@ def expiry_refused(world: World) -> None:
 
 @when("the approvals are listed")
 def approvals_listed(world: World) -> None:
-    world.answer = world.client.get("/approvals", headers=person())
+    world.answer = answered(world.ctx, world.client.get("/approvals", headers=person()))
 
 
 @then("the log says the journal refused its end")
 def log_refused_end(world: World) -> None:
     assert any("the journal refused its end" in line for line in world.lines)
-
-
-@then(parsers.re(r'the page answers (?P<status>\d+)'), converters={"status": int})
-def page_answers(world: World, status: int) -> None:
-    assert world.answer.status_code == status, world.answer.text
-
-
-@then(parsers.parse('the page answers {status:d} saying "{text}"'))
-def page_answers_saying(world: World, status: int, text: str) -> None:
-    assert world.answer.status_code == status and text in world.answer.text
 
 
 # --- Restarts
@@ -597,20 +601,29 @@ def resumed(world: World, state: str) -> None:
     assert third.state == state and "restarted" in third.error
 
 
-@then("a new head starts empty, and a refused head stops the start")
-def empty_and_refused(world: World) -> None:
-    empty = Approvals(world.engine, Ledger(Storage()), log=world.lines.append)
-    empty.start()
-    assert empty.asks == {}
-    refusing = Storage()
-    refusing.refuse = "storage said 503"
-    with pytest.raises(RuntimeError):
-        Approvals(world.engine, Ledger(refusing)).start()
+@given("a storage with no head")
+def storage_no_head(world: World) -> None:
+    world.other_storage = Storage()
+
+
+@given(parsers.parse('a storage that refuses, saying "{said}"'))
+def storage_refusing(world: World, said: str) -> None:
+    world.other_storage = Storage()
+    world.other_storage.refuse = said
+
+
+@when("a new pod starts the approvals from that storage")
+def pod_starts_from(ctx, world: World) -> None:
+    def start() -> dict:
+        approvals = Approvals(world.engine, Ledger(world.other_storage), log=world.lines.append)
+        approvals.start()
+        return approvals.asks
+    ctx.attempt(start)
 
 
 @when(parsers.parse('the person opens "{path}"'))
 def opens(world: World, path: str) -> None:
-    world.answer = world.client.get(path, headers=person())
+    world.answer = answered(world.ctx, world.client.get(path, headers=person()))
 
 
 @then(parsers.parse("the page lists {opened:d} open requests and {ended:d} ended"))
@@ -749,9 +762,10 @@ def awaits_with_buttons(world: World) -> None:
 
 @given(parsers.re(r"the engine has walked Sustenaut/notifier and found (?P<found>.+ graded .+)"),
        target_fixture="world")
-def walked_graded(tmp_path: Path, found: str) -> World:
+def walked_graded(ctx, tmp_path: Path, found: str) -> World:
     parts = re.findall(r'"([^"]+)" (\w+) graded (\w+)(?: detailing "([^"]+)")?', found)
     w = World(tmp_path, needs={n: s for n, s, _, _ in parts})
+    w.ctx = ctx
     w.runner.walk_prints(REPOSITORY, journal(states={n: s for n, s, _, _ in parts}, grades={n: g for n, _, g, _ in parts},
                                              details={n: [d] for n, _, _, d in parts if d}), code=1)
     w.engine.round()
