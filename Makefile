@@ -10,7 +10,7 @@ venv: web ## Create .venv from the hash-locked test requirements, and build the 
 	.venv/bin/pip install --quiet --no-deps -e .
 
 web: ## Build the run page's bundle (web/) into src/convergence/static/, as the image does
-	cd web && npm ci --no-audit --no-fund && npm run build
+	cd web && npm ci --ignore-scripts --no-audit --no-fund && npm run build
 
 web-test: ## The run page's browser scenarios (web/tests/), drawn in jsdom
 	cd web && npm test

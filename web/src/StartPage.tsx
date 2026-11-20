@@ -7,7 +7,7 @@ type NeedChoice = { name: string; grade: string; mode: NeedMode };
 /** "Start a run": a repository, a unit and Check or Fulfil, then each need's mode from the unit's
  *  compiled machine. Starting posts the run, and the page opens it. */
 export function StartPage({ services, go = (to: string) => window.location.assign(to) }: { services: Record<string, string[]>; go?: (to: string) => void }) {
-  const repositories = Object.keys(services).sort();
+  const repositories = Object.keys(services).sort((a, b) => a.localeCompare(b));
   const [repository, setRepository] = useState(repositories[0] ?? "");
   const [unit, setUnit] = useState(services[repositories[0]]?.[0] ?? "");
   const [mode, setMode] = useState<NeedMode>("fulfil");
