@@ -130,9 +130,17 @@ export function journal(run: Run): JournalEntry[] {
   return run.journal.map((e) => ({
     at: e.at.slice(11, 19),
     need: e.need || "run",
-    ...(e.from && e.to && e.from !== e.to ? { from: e.from, to: e.to } : { text: e.result || e.to }),
+    ...(e.from && e.to && e.from !== e.to
+      ? { from: e.from, to: e.result ? `${e.to}: ${e.result}` : e.to }
+      : { text: e.result || e.to }),
     by: e.by || undefined,
   }));
+}
+
+/** Why an ended run ended, as its last event says it: "" when it says nothing. */
+export function endedBecause(run: Run): string {
+  const last = [...run.journal].reverse().find((e) => !e.need && e.to === run.state);
+  return last?.result ?? "";
 }
 
 /** The run's states in which Stop can be pressed. */

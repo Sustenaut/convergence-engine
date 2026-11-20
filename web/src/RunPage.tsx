@@ -15,6 +15,7 @@ import { api, Refused } from "./api";
 import {
   age,
   continuing,
+  endedBecause,
   journal,
   lastSeq,
   machineStates,
@@ -101,6 +102,10 @@ export function RunPage({ initial, mayAct, now = () => Date.now() }: { initial: 
     "The plan is being walked: each need is checked before anything changes."
   ) : run.state === "running" || run.state === "approved" ? (
     "Each need walks as its machine allows, up to the run's limit at once."
+  ) : endedBecause(run) ? (
+    <>
+      This run ended {run.state}: <b>{endedBecause(run)}</b>
+    </>
   ) : (
     `This run ended ${run.state}.`
   );

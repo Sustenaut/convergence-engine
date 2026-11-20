@@ -282,6 +282,7 @@ Feature: Live runs, need by need
       | pubdeploy compiles a machine that is not JSON      | fulfil | pubdeploy machine gave no machine        |
       | pubdeploy compiles a machine it does not run      | fulfil | a machine this engine does not run       |
       | pubdeploy machine cannot run                       | fulfil | pubdeploy machine could not run          |
+      | the service's pubdeploy has no machine command     | fulfil | live runs need pubdeploy 0.5.1 or later  |
       | the journal refuses the request's awaiting         | fulfil | the journal refused its plan             |
       | the journal refuses the request's start            | check  | the journal refused its start            |
 
