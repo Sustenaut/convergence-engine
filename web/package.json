@@ -1,0 +1,30 @@
+{
+  "name": "convergence-run-page",
+  "private": true,
+  "type": "module",
+  "description": "The convergence engine's live run page: React on @sustenaut/ui, bundled into src/convergence/static/ (run.js, run.css) when the image is built.",
+  "scripts": {
+    "build": "esbuild src/main.tsx --bundle --minify --format=iife --target=es2022 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=../src/convergence/static/run.js && tailwindcss -i src/run.css -o ../src/convergence/static/run.css --minify",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "npm run typecheck && vitest run"
+  },
+  "dependencies": {
+    "@sustenaut/ui": "github:Sustenaut/ui#v0.1.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-hook-form": "^7.91.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "quickpickle": "1.11.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5"
+  }
+}

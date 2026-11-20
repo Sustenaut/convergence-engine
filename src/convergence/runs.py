@@ -536,4 +536,5 @@ class Runs:
         out["approver"] = public(out["approver"])
         out["journal"] = [{**e, "by": public(e.get("by", ""))} for e in run.journal if e["seq"] > since]
         out["poll_ms"] = self.poll_ms
+        out["stopping"] = bool(run.stopping)  # whether a person pressed Stop: never who
         return out

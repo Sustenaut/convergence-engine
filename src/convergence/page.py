@@ -72,6 +72,14 @@ STYLE = ("body{margin:0;padding:2rem 1rem}main{margin:0 auto;max-width:76rem}"
 THEME = ("fonts.css", "tokens.css", "base.css")
 HEADERS = {"Cache-Control": "private, no-store",
            "Content-Security-Policy": "default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'"}
+# The run pages run the bundle (/static/run.js), which polls this site: script and connect from here only.
+RUN_HEADERS = {**HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"]
+               + "; script-src 'self'; connect-src 'self'"}
+# The run page's bundle and styles (web/, built into static/ when the image is built): React on
+# @sustenaut/ui. A page without them still works: it shows the run as it is and refreshes.
+STATIC_DIR = Path(__file__).parent / "static"
+STATIC_TYPES = {"run.js": "text/javascript; charset=utf-8", "run.css": "text/css; charset=utf-8"}
+REFRESH_S = 5
 AUTO = ("The engine fulfils this once a person approves its plan (the unit's Fulfil button). From a laptop: "
         "<code>./with-secrets ./pubdeploy walk --fulfil --unit {unit}</code>")
 ROLE = "convergence"
@@ -85,6 +93,45 @@ def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
                         + "".join(f'<link rel="stylesheet" href="/theme/{name}">' for name in THEME)
                         + f"<style>{STYLE}</style><main><h1>{escape(title)}</h1>{body}</main></html>",
                         status_code=status, headers=HEADERS)
+
+
+def _data(value: Any) -> str:
+    """JSON for a data block: no "</" a browser would read as the block's end."""
+    return json.dumps(value).replace("</", "<\\/")
+
+
+def _run_page(title: str, body: str, data: dict[str, Any], status: int = 200) -> HTMLResponse:
+    """A run page: the theme and the run page's styles, the data the bundle starts from, the page as it
+    is now for a reader without script (which refreshes every few seconds), and the bundle."""
+    return HTMLResponse(f'<!doctype html><html lang="en"><meta charset="utf-8">'
+                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                        f'<noscript><meta http-equiv="refresh" content="{REFRESH_S}"></noscript>'
+                        f"<title>{escape(title)}</title>"
+                        + "".join(f'<link rel="stylesheet" href="/theme/{name}">' for name in THEME)
+                        + '<link rel="stylesheet" href="/static/run.css">'
+                        f"<style>{STYLE}</style>"
+                        f'<script type="application/json" id="page-data">{_data(data)}</script>'
+                        f'<main><div id="page"><h1>{escape(title)}</h1>{body}</div></main>'
+                        '<script src="/static/run.js"></script></html>',
+                        status_code=status, headers=RUN_HEADERS)
+
+
+def _run_body(view: dict[str, Any]) -> str:
+    """The run as a reader without script sees it: its state, its needs and its journal."""
+    head = (f"<p>Unit <b>{escape(view['unit'])}</b> · {escape(view['mode'])} · "
+            f"<b>{escape(view['state'])}</b>"
+            + (f' · <a href="{escape(view["github_run_url"])}">GitHub run</a>' if view.get("github_run_url") else "")
+            + f" · <code>{escape(view['id'])}</code></p>")
+    needs = [[escape(name), escape(n["grade"]), escape(n["mode"]), f"<span class={escape(n['state'])}>"
+              f"{escape(n['state'])}</span>", escape(n["result"]), escape(n["stop"])]
+             for name, n in view["needs"].items()]
+    journal = "".join(f"<li><code>{escape(e['at'][11:19])} · {escape(e.get('need') or 'run')} · "
+                      f"{escape(e.get('from') or '')} → {escape(e.get('to') or '')}"
+                      f"{' · ' + escape(e['by']) if e.get('by') else ''}</code>" for e in view["journal"])
+    return (head + _table(["Need", "Grade", "Mode", "State", "Last result", "On Stop"], needs, "No needs yet.")
+            + f"<h2>Journal</h2><ol>{journal}</ol>"
+            + f"<p class=why>Without script this page refreshes every {REFRESH_S} s; approving and stopping "
+              "need script.</p>")
 
 
 def _table(head: list[str], rows: list[list[str]], empty: str) -> str:
@@ -268,6 +315,16 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
             raise HTTPException(404, "no such file")
         return Response(theme[path], media_type=THEME_TYPES[path.rsplit(".", 1)[-1]],
                         headers={"Cache-Control": "private, max-age=86400"})
+
+    static = {name: (STATIC_DIR / name).read_bytes() for name in STATIC_TYPES if (STATIC_DIR / name).is_file()}
+
+    @app.get("/static/{name}")
+    def static_file(name: str) -> Response:
+        """The run page's bundle and styles, built into static/ with the image; nothing else."""
+        if name not in static:
+            raise HTTPException(404, "no such file")
+        return Response(static[name], media_type=STATIC_TYPES[name],
+                        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"})
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
@@ -453,11 +510,50 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
             return JSONResponse({"refused": e.why}, status_code=e.status, headers=HEADERS)
         return JSONResponse(out, status_code=ok, headers=HEADERS)
 
+    def units() -> dict[str, list[str]]:
+        """Each service's units, as its last walk found them: what Start a run offers."""
+        return {s.repository: [d["service"]["unit"] for d in (s.last.documents if s.last else [])]
+                for s in engine.status.services.values()}
+
+    @app.get("/runs/new")
+    def new_run(request: Request) -> HTMLResponse:
+        """Start a run: for a signed-in person, the form (the bundle draws it); for anyone else, why not."""
+        if runs is None:
+            raise HTTPException(503, "this engine has no live runs")
+        if not person(request):
+            return _page("Start a run", "<p>Sign in with the role convergence to start a run.</p>", 403)
+        body = ("<noscript><p>Starting a run needs script: the form reads each unit's machine.</p></noscript>"
+                + _table(["Service", "Units"], [[escape(r), escape(", ".join(u))] for r, u in units().items()],
+                         "No service has the role deploy yet."))
+        return _run_page("Start a run", body, {"kind": "new", "services": units()})
+
+    @app.get("/runs/new/needs")
+    def new_run_needs(request: Request, repository: str, unit: str, mode: str = "fulfil") -> JSONResponse:
+        """The needs of a unit's compiled machine, each with the mode it would run in: Start a run's list."""
+        actor = person(request)
+        if not actor:
+            raise HTTPException(403, "no signed-in person with the role convergence")
+        if repository not in units() or unit not in units()[repository] or mode not in ("check", "fulfil"):
+            raise HTTPException(404, "no such unit")
+        machine = engine.machine(repository, unit, mode, {}, actor)
+        if isinstance(machine, str):
+            return JSONResponse({"refused": machine}, status_code=409, headers=HEADERS)
+        regions = ((machine.get("states") or {}).get("running") or {}).get("states") or {}
+        needs = [{"name": str((r.get("meta") or {}).get("need") or key), "grade": str((r.get("meta") or {}).get("grade")),
+                  "mode": "check" if mode == "check" else str((r.get("meta") or {}).get("mode") or "fulfil")}
+                 for key, r in regions.items()]
+        return JSONResponse({"needs": needs}, headers=HEADERS)
+
     @app.get("/runs/{id_}")
-    def run_state(id_: str, since: int = 0) -> JSONResponse:
+    def run_state(id_: str, request: Request, since: int | None = None) -> Response:
+        """The run: JSON for a poll (`since`, or Accept: application/json), else its page."""
         run = run_of(id_)
-        headers = {**HEADERS, "Cache-Control": "private, max-age=3600"} if run.ended else HEADERS
-        return JSONResponse(runs.view(run, since), headers=headers)
+        view = runs.view(run, since or 0)
+        if since is not None or "application/json" in request.headers.get("accept", ""):
+            headers = {**HEADERS, "Cache-Control": "private, max-age=3600"} if run.ended else HEADERS
+            return JSONResponse(view, headers=headers)
+        title = f"{run.repository} · {run.unit}"
+        return _run_page(title, _run_body(view), {"kind": "run", "run": view, "may_act": bool(person(request))})
 
     @app.post("/runs")
     async def start_run(request: Request) -> JSONResponse:

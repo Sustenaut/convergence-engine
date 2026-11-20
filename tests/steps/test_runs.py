@@ -28,6 +28,7 @@ from .fakes import Storage, journal
 from .world import REPOSITORY, SITE, WHO, World, answered, person
 
 scenarios("runs.feature")
+scenarios("runpage.feature")
 
 WARNING = "it migrates the database"
 
@@ -490,7 +491,7 @@ def run_is(live: Live, state: str, mode: str, names: str) -> None:
     (call,) = [argv for argv, _, _ in live.world.runner.calls if argv[:2] == ["./pubdeploy", "machine"]]
     assert call == ["./pubdeploy", "machine", "--unit", "notifier", "--mode", mode]
     assert {n: x.state for n, x in run.needs.items()} == {n: "waiting" for n in re.findall(r'"([^"]+)"', names)}
-    view = live.world.client.get(f"/runs/{run.id}", headers=person()).json()
+    view = live.world.client.get(f"/runs/{run.id}", headers={**person(), "Accept": "application/json"}).json()
     assert view["request_id"] == run.id and view["image"] == "registry.example/engine:1"
     assert view["github_run_url"].endswith("/actions/runs/777") and view["plan_key"] == run.plan_key
 
@@ -835,3 +836,135 @@ def handler_ran(live: Live) -> None:
     assert live.ended is not None, "the walk kept running"
     code, out, err = live.ended
     assert "SIGUSR1 handled" in out and code == 0, (code, out, err)
+
+
+# --- The run's page (runpage.feature) -----------------------------------------------------------
+
+
+@when("a person opens the run's page")
+def opens_page(live: Live) -> None:
+    live.world.approvals.wait()
+    live.answer = live.world.client.get(f"/runs/{live.run.id}", headers={**person(), "Accept": "text/html"})
+
+
+@then("the page is HTML that refreshes every 5 s for a reader without script")
+def html_refresh(live: Live) -> None:
+    assert live.answer.status_code == 200 and live.answer.headers["content-type"].startswith("text/html")
+    assert '<noscript><meta http-equiv="refresh" content="5"></noscript>' in live.answer.text
+
+
+@then(parsers.parse('the page shows the run\'s state "{state}" and the need "{need}"'))
+def page_shows(live: Live, state: str, need: str) -> None:
+    body = live.answer.text.split('<div id="page">', 1)[1]
+    assert f"<b>{state}</b>" in body and need in body
+
+
+def _data_block(text: str) -> dict:
+    found = re.search(r'<script type="application/json" id="page-data">(.*?)</script>', text, re.S)
+    assert found, text[:400]
+    return json.loads(found.group(1))
+
+
+@then("the page's data block holds the run's public view, its plan_key among it")
+def data_block(live: Live) -> None:
+    data = _data_block(live.answer.text)
+    assert data["kind"] == "run" and data["may_act"] is True
+    assert data["run"]["id"] == live.run.id and data["run"]["plan_key"] == live.run.plan_key
+    assert "@" not in json.dumps(data) and "token" not in data["run"]
+
+
+@then("the page loads /static/run.js and /static/run.css")
+def loads_bundle(live: Live) -> None:
+    assert '<script src="/static/run.js"></script>' in live.answer.text
+    assert '<link rel="stylesheet" href="/static/run.css">' in live.answer.text
+
+
+@then(parsers.parse('its Content-Security-Policy is exactly "{csp}"'))
+def csp_exact(live: Live, csp: str) -> None:
+    assert live.answer.headers["Content-Security-Policy"] == csp
+
+
+@then(parsers.parse('the engine\'s other pages keep their Content-Security-Policy "{csp}"'))
+def csp_others(live: Live, csp: str) -> None:
+    assert live.world.client.get("/", headers=person()).headers["Content-Security-Policy"] == csp
+
+
+@when(parsers.parse('a person asks for "{path}"'))
+def asks_for(live: Live, path: str) -> None:
+    _bind(live, live.runs_for(live.world.storage)) if not hasattr(live.world, "client") else None
+    live.answer = live.world.client.get(path, headers=person())
+
+
+@then(parsers.parse('it answers {status:d} as "{kind}", not to be sniffed'))
+def answers_as(live: Live, status: int, kind: str) -> None:
+    assert live.answer.status_code == status and live.answer.headers["content-type"] == kind
+    assert live.answer.headers["X-Content-Type-Options"] == "nosniff" and live.answer.content
+
+
+@then(parsers.parse("it answers {status:d}"))
+def answers_status(live: Live, status: int) -> None:
+    assert live.answer.status_code == status, live.answer.text
+
+
+@when(parsers.parse("the bundle polls the run after event {seq:d}"))
+def polls_after(live: Live, seq: int) -> None:
+    live.world.approvals.wait()
+    live.answer = live.world.client.get(f"/runs/{live.run.id}?since={seq}", headers=person())
+    live.since = seq
+
+
+@then(parsers.parse("the answer is JSON with only the events after {seq:d}"))
+def json_after(live: Live, seq: int) -> None:
+    body = live.answer.json()
+    assert body["journal"] and all(e["seq"] > seq for e in body["journal"])
+    assert len(body["journal"]) == len(live.run.journal) - seq
+
+
+@when("the bundle asks for the run with Accept: application/json")
+def asks_json(live: Live) -> None:
+    live.answer = live.world.client.get(f"/runs/{live.run.id}", headers={**person(), "Accept": "application/json"})
+
+
+@then("the answer is JSON with every event")
+def json_all(live: Live) -> None:
+    assert [e["seq"] for e in live.answer.json()["journal"]] == [e["seq"] for e in live.run.journal]
+
+
+@when(parsers.parse('a person opens "{path}"'))
+def opens_path(live: Live, path: str) -> None:
+    live.answer = live.world.client.get(path, headers={**person(), "Accept": "text/html"})
+
+
+@when(parsers.parse('someone not signed in opens "{path}"'))
+def stranger_opens(live: Live, path: str) -> None:
+    live.answer = live.world.client.get(path, headers={"Accept": "text/html"})
+
+
+@then(parsers.parse('the page\'s data block lists the unit "{unit}" of the service'))
+def lists_unit(live: Live, unit: str) -> None:
+    data = _data_block(live.answer.text)
+    assert data["kind"] == "new" and unit in data["services"][REPOSITORY], data
+
+
+@when(parsers.re(r'the bundle asks for the needs of the unit "(?P<unit>[^"]+)" in mode "(?P<mode>\w+)"'
+                 r"(?P<stranger>, for someone not signed in)?$"))
+def asks_needs(live: Live, unit: str, mode: str, stranger: str | None) -> None:
+    live.answer = live.world.client.get(f"/runs/new/needs?repository={REPOSITORY}&unit={unit}&mode={mode}",
+                                        headers={} if stranger else person())
+
+
+@given("the engine walks as it always does")
+def as_always(live: Live) -> None:
+    """Nothing changed: the scenario's other steps say what it asks."""
+
+
+@given("the engine has no live runs")
+def no_live_runs(live: Live) -> None:
+    _bind(live, None)
+
+
+@then(parsers.parse('the needs read "{listed}"'))
+def needs_read(live: Live, listed: str) -> None:
+    assert live.answer.status_code == 200, live.answer.text
+    got = ", ".join(f"{n['name']} {n['mode']}" for n in live.answer.json()["needs"])
+    assert got == listed

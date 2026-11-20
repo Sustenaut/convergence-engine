@@ -65,7 +65,10 @@ Behind oauth2-proxy and the team sign-in, for people with the role `convergence`
 | `/approvals/ID` | one request: its plan and the plan's sha256, where it came from (with a link to the GitHub run), Approve and Decline while it awaits, each state change with who and when, and a Fulfil's output and end states; it reloads itself while it works |
 | `POST /approvals/ID` | a person's Approve or Decline |
 | `/fulfils/ID` | 4b's links: redirects to `/approvals/ID` |
-| `GET /runs/ID?since=SEQ` | a live run (JSON): its state, machine, plan, plan key, each need's state, mode, grade, type, stop class and result, its journal after SEQ, and `poll_ms` (2000); public() throughout, and kept an hour once it has ended |
+| `GET /runs/ID` | a live run's page for a browser: drawn once with its public view as a JSON data block, then kept current by `/static/run.js`; without script it refreshes every 5 s. CSP `script-src 'self'; connect-src 'self'` |
+| `GET /runs/new` | Start a run, for a signed-in person: repository, unit and mode, then each need's mode from the unit's compiled machine (`GET /runs/new/needs?repository=R&unit=U&mode=M`, JSON) |
+| `GET /static/run.js`, `/static/run.css` | the run page's bundle and styles (`web/`: React on @sustenaut/ui and the theme), built into the image; nothing loads from anywhere else |
+| `GET /runs/ID?since=SEQ` | a live run (JSON, also for `Accept: application/json`): its state, machine, plan, plan key, each need's state, mode, grade, type, stop class and result, its journal after SEQ, and `poll_ms` (2000); public() throughout, and kept an hour once it has ended |
 | `POST /runs` | a signed-in approver's live run, JSON `{repository, unit, mode: check\|fulfil, modes?}`: a request of theirs, which awaits approval as any (a check needs none) |
 | `POST /runs/ID/approve` | approve it, JSON `{plan_key}`: the request's approval (the same rule), which freezes the modes |
 | `POST /runs/ID/stop` | before approval, decline; while it walks, stop (each need as its class says); 204 once it has ended |

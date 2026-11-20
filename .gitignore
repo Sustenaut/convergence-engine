@@ -8,3 +8,7 @@ __pycache__/
 
 # Local secrets, such as the Bitwarden token ./with-secrets reads: never committed.
 .env
+
+# The run page's bundle, built from web/ (make web, and the image's build): never committed.
+/src/convergence/static/
+/web/node_modules/

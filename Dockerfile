@@ -8,6 +8,15 @@
 # their pinned wheels with uv and curl, render with kustomize, read the cluster with
 # kubectl as the pod's ServiceAccount, read GitHub with gh, and resolve DNS with dig (dns.site). Each tool is a pinned
 # release, checked against its sha256; bws is there for ./pubsec run's reads.
+# The run page's bundle (web/: React on @sustenaut/ui), built here so the image serves it from
+# /static/ and the page loads nothing from anywhere else.
+FROM node:22.22.1-slim@sha256:4f77a690f2f8946ab16fe1e791a3ac0667ae1c3575c3e4d0d4589e9ed5bfaf3d AS web
+WORKDIR /build/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTHONPATH=/opt/convergence
 ARG KUBECTL=v1.37.2 KUBECTL_SHA256=c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
@@ -42,6 +51,7 @@ RUN pip install --only-binary :all: --require-hashes -r /tmp/requirements.lock \
               -r /tmp/mirrored.lock; } \
     && rm -f /tmp/requirements.lock /tmp/mirrored.lock /tmp/mirrored-lock.py
 COPY src/convergence/ /opt/convergence/convergence/
+COPY --from=web /build/src/convergence/static/ /opt/convergence/convergence/static/
 RUN useradd --create-home --uid 1000 app
 USER app
 CMD ["uvicorn", "convergence.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-server-header"]

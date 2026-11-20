@@ -1,21 +1,28 @@
 # convergence-engine: every deploy service walked read-only, its needs shown.
-.PHONY: help venv functional lock sync-check check
+.PHONY: help venv web web-test functional lock sync-check check
 
 help: ## Available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
 
-venv: ## Create .venv from the hash-locked test requirements
+venv: web ## Create .venv from the hash-locked test requirements, and build the run page's bundle
 	python3 -m venv .venv
 	.venv/bin/pip install --quiet --require-hashes -r tests/requirements.lock
 	.venv/bin/pip install --quiet --no-deps -e .
 
-functional: ## The Gherkin suite, with its coverage in coverage/coverage.xml
+web: ## Build the run page's bundle (web/) into src/convergence/static/, as the image does
+	cd web && npm ci --no-audit --no-fund && npm run build
+
+web-test: ## The run page's browser scenarios (web/tests/), drawn in jsdom
+	cd web && npm test
+
+functional: ## The Gherkin suite, with its coverage in coverage/coverage.xml; then the run page's browser scenarios
 	rm -rf coverage && mkdir coverage
 	cd tests && PYTHONPATH=$(CURDIR)/src COVERAGE_RCFILE=$(CURDIR)/pyproject.toml COVERAGE_FILE=$(CURDIR)/coverage/.coverage \
 	  ../.venv/bin/coverage run -m pytest -q $(PYTEST_ARGS)
 	COVERAGE_FILE=coverage/.coverage .venv/bin/coverage combine -q
 	COVERAGE_FILE=coverage/.coverage .venv/bin/coverage report
 	COVERAGE_FILE=coverage/.coverage .venv/bin/coverage xml -q -o coverage/coverage.xml
+	$(MAKE) web-test
 
 lock: ## Pin tests/requirements.txt with hashes
 	.venv/bin/pubrules lock
@@ -23,4 +30,4 @@ lock: ## Pin tests/requirements.txt with hashes
 sync-check: ## Fail if pubrules's managed files drifted
 	./pubrules sync --check
 
-check: sync-check functional ## Everything CI runs
+check: sync-check functional ## Everything CI runs (functional runs web-test too)
