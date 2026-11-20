@@ -4,7 +4,7 @@
   "type": "module",
   "description": "The convergence engine's live run page: React on @sustenaut/ui, bundled into src/convergence/static/ (run.js, run.css) when the image is built.",
   "scripts": {
-    "build": "esbuild src/main.tsx --bundle --minify --format=iife --target=es2022 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=../src/convergence/static/run.js && tailwindcss -i src/run.css -o ../src/convergence/static/run.css --minify",
+    "build": "esbuild src/main.tsx --bundle --minify --jsx=automatic --format=iife --target=es2022 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=../src/convergence/static/run.js && tailwindcss -i src/run.css -o ../src/convergence/static/run.css --minify",
     "typecheck": "tsc --noEmit -p .",
     "test": "npm run typecheck && vitest run"
   },
@@ -18,6 +18,7 @@
     "@tailwindcss/cli": "^4.3.3",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
+    "@types/jsdom": "^21.1.7",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
