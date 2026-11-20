@@ -37,10 +37,20 @@ export function StartPage({ services, go = (to: string) => window.location.assig
   };
 
   const select = "min-h-11 rounded-control border border-rule-strong bg-surface px-2.5";
+  if (repositories.length === 0) {
+    return (
+      <Panel title="Start a run" as="section">
+        <Callout tone="warning">
+          The engine lists no repository yet. It lists each repository with a deploy block once a round has
+          walked it: see the <a href="/">overview</a>, which says why when no round has run.
+        </Callout>
+      </Panel>
+    );
+  }
   return (
     <Panel title="Start a run" as="section">
       <p className="m-0 text-sm text-muted">The run opens on its own page. It plans first and asks for approval before it changes anything.</p>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid items-start gap-4 sm:grid-cols-3">
         <label className="flex flex-col gap-1.5 text-sm font-bold">
           Repository
           <select
@@ -57,15 +67,31 @@ export function StartPage({ services, go = (to: string) => window.location.assig
           </select>
         </label>
         <label className="flex flex-col gap-1.5 text-sm font-bold">
-          Unit
-          <select className={select} value={unit} onChange={(e) => setUnit(e.target.value)}>
+          Deploy unit
+          <select
+            className={select}
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            aria-describedby="unit-hint"
+          >
             {(services[repository] ?? []).map((u) => (
               <option key={u}>{u}</option>
             ))}
           </select>
         </label>
-        <ModeSwitch name="run" legend="Run" value={mode} onChange={setMode} />
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold" aria-hidden="true">
+            What the run does
+          </span>
+          <ModeSwitch name="run" legend="What the run does" value={mode} onChange={setMode} />
+        </div>
       </div>
+      <p id="unit-hint" className="m-0 text-sm text-muted">
+        A deploy unit is one part of a repository that is deployed on its own, as the deploy block of the
+        repository's pubrules.json names it. Most repositories have one, named after the service. Check
+        reads each need of the unit and changes nothing. Fulfil makes what is missing, once you approve the
+        plan.
+      </p>
       {needs.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-rule pt-4">
           <div className="text-sm font-bold">Needs in {unit}, from its machine</div>

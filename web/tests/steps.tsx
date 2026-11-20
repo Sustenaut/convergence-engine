@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, vi } from "vitest";
 import { After, Given, Then, When } from "quickpickle";
 import { RunPage, SETTLE_MS } from "../src/RunPage";
+import { StartPage } from "../src/StartPage";
 import type { Event, Need, Run } from "../src/view";
 
 type Sent = { method: string; url: string; body: unknown };
@@ -259,5 +260,46 @@ After(async () => {
   Then("the journal's last line reads {string}", (_w: World, text: string) => {
     const lines = within(screen.getByRole("list", { name: "Journal" })).getAllByRole("listitem");
     expect(lines.at(-1)!.textContent).toBe(text);
+  });
+}
+
+
+// Start a run (StartPage)
+{
+  type StartWorld = World & { services: Record<string, string[]> };
+
+  Given(
+    "the engine lists the repository {string} with the deploy unit {string}",
+    (world: StartWorld, repository: string, unit: string) => {
+      Object.assign(world, { services: { [repository]: [unit] }, sent: [], answers: { "GET /runs/new/needs": { needs: [] } } });
+    },
+  );
+
+  Given("the engine lists no repository", (world: StartWorld) => {
+    Object.assign(world, { services: {}, sent: [], answers: {} });
+  });
+
+  When("Start a run is drawn", (world: StartWorld) =>
+    act(async () => {
+      vi.stubGlobal("fetch", fakeFetch(world));
+      render(<StartPage services={world.services} go={() => undefined} />);
+    }),
+  );
+
+  Then("the field {string} is described by a line saying {string}", (_w: World, label: string, text: string) => {
+    const field = screen.getByLabelText(label);
+    const hint = document.getElementById(field.getAttribute("aria-describedby") ?? "");
+    expect(hint?.textContent).toContain(text);
+  });
+
+  Then("the page shows the label {string} over the Check and Fulfil switch", (_w: World, label: string) => {
+    const group = screen.getByRole("group", { name: label });
+    expect(group.parentElement!.firstElementChild!.textContent).toBe(label);
+    expect(within(group).getAllByRole("radio")).toHaveLength(2);
+  });
+
+  Then("the page says {string} and links to the overview", (_w: World, text: string) => {
+    expect(screen.getByText(text, { exact: false })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "overview" }).getAttribute("href")).toBe("/");
   });
 }

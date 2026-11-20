@@ -71,3 +71,14 @@ Feature: The live run page in a browser
     Then the page polled the run after event 2
     And the journal's last line reads "09:03:00 · ingest-token · waiting → checking · engine"
     And the row of "ingest-token" reads "2 min 30 s"
+
+  Scenario: Start a run explains a deploy unit, and labels what the run does beside the dropdowns
+    Given the engine lists the repository "Sustenaut/integrations" with the deploy unit "integrations"
+    When Start a run is drawn
+    Then the field "Deploy unit" is described by a line saying "A deploy unit is one part of a repository"
+    And the page shows the label "What the run does" over the Check and Fulfil switch
+
+  Scenario: Start a run with no repository listed says why
+    Given the engine lists no repository
+    When Start a run is drawn
+    Then the page says "The engine lists no repository yet" and links to the overview
