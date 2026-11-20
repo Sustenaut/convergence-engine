@@ -244,6 +244,9 @@ class Engine:
             machine = None
         if not isinstance(machine, dict) or "running" not in (machine.get("states") or {}):
             said = (ran.stderr.strip().splitlines() or [f"exit {ran.code}"])[-1][:300]
+            if "invalid choice: 'machine'" in ran.stderr:  # a pubdeploy before 0.5.1, which has no machine
+                return ("this service's pubdeploy compiles no machine: live runs need pubdeploy 0.5.1 or later "
+                        "in its pubrules.json deploy.providers (then pubrules sync)")
             return f"pubdeploy machine gave no machine ({said})"
         if bad := need_machine.validate(machine):  # what the engine's pubdeploy runs, it must read
             return f"pubdeploy machine gave a machine this engine does not run ({'; '.join(bad)[:300]})"

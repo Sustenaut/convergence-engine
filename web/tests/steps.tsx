@@ -143,6 +143,27 @@ After(async () => {
     Object.assign(world, { run: awaitingRun(), mayAct: true, sent: [], answers: {}, now: Date.parse("2026-11-20T09:01:30Z") });
   });
 
+  Given("a run that failed at its plan, saying {string}", (world: World, why: string) => {
+    const run = awaitingRun();
+    Object.assign(world, {
+      run: {
+        ...run,
+        state: "failed",
+        plan: [],
+        plan_key: "",
+        needs: {},
+        journal: [
+          { seq: 1, at: "2026-11-20T20:26:04Z", need: "", from: "", to: "planning", by: "[someone]" },
+          { seq: 2, at: "2026-11-20T20:26:34Z", need: "", from: "planning", to: "failed", by: "engine", result: why },
+        ],
+      },
+      mayAct: true,
+      sent: [],
+      answers: {},
+      now: Date.parse("2026-11-20T20:27:00Z"),
+    });
+  });
+
   Given("a viewer who may not act", (world: World) => {
     world.mayAct = false;
   });

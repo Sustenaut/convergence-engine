@@ -82,3 +82,9 @@ Feature: The live run page in a browser
     Given the engine lists no repository
     When Start a run is drawn
     Then the page says "The engine lists no repository yet" and links to the overview
+
+  Scenario: A run that failed says why, in its header and its journal
+    Given a run that failed at its plan, saying "this service's pubdeploy compiles no machine"
+    When the page is drawn
+    Then the header says "This run ended failed: this service's pubdeploy compiles no machine"
+    And the journal's last line reads "20:26:34 · run · planning → failed: this service's pubdeploy compiles no machine · engine"
