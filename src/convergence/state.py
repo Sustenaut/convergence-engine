@@ -38,3 +38,17 @@ def services(text: str, where: str = "state.json") -> list[str]:
 
 def read(clone: Path) -> list[str]:
     return services((clone / "state.json").read_text(encoding="utf-8"), f"{clone.name}/state.json")
+
+
+def units(clone: Path) -> list[str]:
+    """The deploy units a repository's pubrules.json names: its deploy block's namespace,
+    the unit a walk takes by default, then each of its `units`, in order; none without a
+    block, or with one that is not as pubdeploy reads it."""
+    try:
+        block = json.loads((clone / "pubrules.json").read_text(encoding="utf-8")).get("deploy")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(block, dict) or not isinstance(block.get("namespace"), str):
+        return []
+    extra = block.get("units") if isinstance(block.get("units"), dict) else {}
+    return [block["namespace"], *[u for u in extra if u != block["namespace"]]]

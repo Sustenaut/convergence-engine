@@ -41,6 +41,7 @@ class Runner:
         self.machines: dict[str, Ran] = {}  # what `pubdeploy machine` prints, by repository (step 1's command)
         self.failing: dict[str, str] = {}  # repository -> git's last words
         self.states: dict[str, str] = {}  # state repository -> state.json
+        self.configs: dict[str, str] = {}  # repository -> its pubrules.json, written into its clone
 
     def __call__(self, argv: list[str], cwd: Path, env, timeout: float) -> Ran:
         self.calls.append((list(argv), cwd, dict(env)))
@@ -56,6 +57,8 @@ class Runner:
             else:
                 (dest / "pubdeploy").write_text("#!/bin/sh\n")
                 (dest / "pubsec").write_text("#!/bin/sh\n")
+                if slug in self.configs:
+                    (dest / "pubrules.json").write_text(self.configs[slug])
             return Ran(0, "", "")
         slug = f"{cwd.parent.name}/{cwd.name}"
         if argv[:2] == ["./pubdeploy", "machine"]:

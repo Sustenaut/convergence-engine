@@ -42,6 +42,7 @@ class Service:
     last: Walk | None = None  # the last walk that printed journals
     failure: str = ""  # why the latest try did not, if it did not
     tried_at: str = ""
+    units: list[str] = field(default_factory=list)  # its deploy block's units, read before any walk
 
 
 @dataclass
@@ -117,6 +118,25 @@ class Engine:
         finally:
             self._running.release()
 
+    def listing(self) -> bool:
+        """The services and their deploy units, read from the state repositories and each
+        service's pubrules.json, walking nothing: what a new pod shows until its first round.
+        False, said in the problem, when they could not be read."""
+        try:
+            credentials = self.credentials()
+            listed = self.services(credentials.github_token)
+        except Exception as e:  # noqa: BLE001 - the first round says it again, and tries again
+            self.status.problem = f"not listed yet: {type(e).__name__}"
+            self.log(f"convergence: the services could not be listed at start ({type(e).__name__})")
+            return False
+        for repository in listed:
+            service = self.status.services.setdefault(repository, Service(repository))
+            try:
+                service.units = state.units(self.clones.refresh(repository, credentials.github_token))
+            except CloneFailed as e:
+                self.log(f"convergence: {e}")
+        return True
+
     def _round(self, by: str) -> None:
         try:
             credentials = self.credentials()
@@ -157,6 +177,7 @@ class Engine:
             service.failure, service.tried_at = str(e), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock()))
             self.log(f"convergence: {service.failure}")
             return
+        service.units = state.units(clone)
         # Read again for each walk: the kubelet renews the projected token, and a round is long.
         credentials = dataclasses.replace(credentials, storage_token=read_secret(self.settings.storage_token))
         with self.walking(service.repository):
@@ -296,6 +317,7 @@ class Engine:
     def loop(self, stop: threading.Event) -> None:  # pragma: no cover - the pod's thread; round() is tested
         # A new pod is usually a deploy of the engine, whose run is still finishing: walked
         # at once, its own deploy.rollout and service.health would be judged mid-deploy.
+        self.listing()  # the services and their units at once; the walks wait
         stop.wait(self.settings.first_round_seconds)
         while not stop.is_set():
             began = self.clock()

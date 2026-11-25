@@ -134,3 +134,35 @@ Feature: Rounds of read-only walks
     Given a round is running
     When a round is asked for from another thread
     Then the result is "false"
+
+  Scenario: A new engine lists the services and their deploy units before its first round
+    Given Sustenaut/notifier's pubrules.json deploys the namespace "notifier" and the units "notifier-eu"
+    When the engine starts and lists the services
+    Then it lists Sustenaut/notifier with the units "notifier, notifier-eu"
+    And it lists Sustenaut/observability with no units
+    And nothing was walked
+
+  Scenario: A round reads each service's deploy units again
+    Given Sustenaut/notifier's pubrules.json deploys the namespace "notifier" and the units "notifier-eu"
+    And the engine starts and lists the services
+    And Sustenaut/notifier's pubrules.json deploys the namespace "notifier" and the units "notifier-eu, notifier-us"
+    When a round runs
+    Then it lists Sustenaut/notifier with the units "notifier, notifier-eu, notifier-us"
+
+  Scenario: A pubrules.json without a deploy block, or not JSON, names no unit
+    Given Sustenaut/notifier's pubrules.json is "{"kind": "service"}"
+    And Sustenaut/observability's pubrules.json is "not JSON"
+    When the engine starts and lists the services
+    Then it lists Sustenaut/notifier with no units
+    And it lists Sustenaut/observability with no units
+
+  Scenario: A new engine that cannot list the services says so, and its first round tries again
+    Given git cannot clone Sustenaut/release-state: "repository not found"
+    When the engine starts and lists the services
+    Then the engine's problem reads "not listed yet"
+    And it prints a line matching "convergence: the services could not be listed at start (CloneFailed)"
+
+  Scenario: A service whose clone fails is listed, with no units
+    Given git cannot clone Sustenaut/notifier: "repository not found"
+    When the engine starts and lists the services
+    Then it lists Sustenaut/notifier with no units

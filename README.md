@@ -11,7 +11,13 @@ step after.
 
 ## What it does
 
-A round runs at start and then every 30 minutes, one service after another:
+A new pod lists the services at once: the state repositories' services, and each
+one's deploy units as its `pubrules.json` names them (the deploy block's
+`namespace`, then each of its `units`), walking nothing, so the overview and Start a
+run show them while the first round waits 5 minutes (`CONVERGENCE_FIRST_ROUND_SECONDS`),
+not to judge the engine's own deploy mid-rollout. Each round reads the units again.
+
+A round runs after that wait and then every 30 minutes, one service after another:
 
 1. **The list.** It refreshes a shallow clone of each state repository
    (`CONVERGENCE_STATES`, by default `Sustenaut/release-state`) and takes every
