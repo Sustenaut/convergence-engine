@@ -511,8 +511,9 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         return JSONResponse(out, status_code=ok, headers=HEADERS)
 
     def units() -> dict[str, list[str]]:
-        """Each service's units, as its last walk found them: what Start a run offers."""
-        return {s.repository: [d["service"]["unit"] for d in (s.last.documents if s.last else [])]
+        """Each service's units, as its pubrules.json names them (read at start and each round),
+        else as its last walk found them: what Start a run offers."""
+        return {s.repository: s.units or [d["service"]["unit"] for d in (s.last.documents if s.last else [])]
                 for s in engine.status.services.values()}
 
     @app.get("/runs/new")

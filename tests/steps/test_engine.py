@@ -237,3 +237,44 @@ def listed(world: World, count: int) -> None:
 @when(parsers.parse('the work directory "{name}" is prepared'))
 def prepared(ctx, name: str) -> None:
     ctx.attempt(lambda: prepare(ctx.directory / name))
+
+
+# --- The services listed at start ---------------------------------------------------------------
+
+
+@given(parsers.parse("{repository}'s pubrules.json deploys the namespace \"{namespace}\" and the units \"{units}\""))
+def deploys(world: World, repository: str, namespace: str, units: str) -> None:
+    world.runner.configs[repository] = json.dumps(
+        {"deploy": {"namespace": namespace, "units": {u: {"namespace": u} for u in units.split(", ")}}})
+
+
+@given(parsers.re(r"(?P<repository>\S+)'s pubrules\.json is \"(?P<text>.*)\"$"))
+def config_is(world: World, repository: str, text: str) -> None:
+    world.runner.configs[repository] = text
+
+
+@given("the engine starts and lists the services")
+@when("the engine starts and lists the services")
+def lists(ctx, world: World) -> None:
+    ctx.attempt(world.engine.listing)
+
+
+@then(parsers.parse('it lists {repository} with the units "{units}"'))
+def listed_units(world: World, repository: str, units: str) -> None:
+    assert world.engine.status.services[repository].units == units.split(", ")
+
+
+@then(parsers.parse("it lists {repository} with no units"))
+def listed_none(world: World, repository: str) -> None:
+    assert world.engine.status.services[repository].units == []
+
+
+@then("nothing was walked")
+def nothing_walked(world: World) -> None:
+    assert not [c for c in world.runner.calls if c[0][0].startswith("./pubdeploy")]
+    assert all(s.last is None for s in world.engine.status.services.values())
+
+
+@then(parsers.parse('the engine\'s problem reads "{text}"'))
+def problem_reads(world: World, text: str) -> None:
+    assert text in world.engine.status.problem, world.engine.status.problem
