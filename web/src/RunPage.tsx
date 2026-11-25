@@ -154,12 +154,18 @@ export function RunPage({ initial, mayAct, now = () => Date.now() }: { initial: 
             </div>
           </div>
           <div>
-            <div className="text-xs font-bold tracking-wide text-muted uppercase">plan_key</div>
-            <div className="mt-1 font-mono text-sm" data-testid="plan-key">
+            <div className="text-xs font-bold tracking-wide text-muted uppercase" id="plan-key-label">
+              Plan key
+            </div>
+            <div className="mt-1 font-mono text-sm" data-testid="plan-key" aria-labelledby="plan-key-label">
               {run.plan_key}
             </div>
           </div>
-          {awaiting && <div className="text-sm text-muted">Changes with every switch. Approve unlocks 1.5 s after the last change.</div>}
+          <div className="max-w-prose text-sm text-muted">
+            A fingerprint of the plan as it stands: each need, its state and what it should do. Approve approves
+            exactly this plan, so a plan that changed meanwhile is refused.
+            {awaiting && " It changes with every switch, and Approve unlocks 1.5 s after the last change."}
+          </div>
         </div>
       </Panel>
       <NeedTable caption="Needs" headings={["Need", "Grade", "What it should do", "Machine", "State", "Last result", "On Stop"]}>

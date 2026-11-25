@@ -324,3 +324,10 @@ After(async () => {
     expect(screen.getByRole("link", { name: "overview" }).getAttribute("href")).toBe("/");
   });
 }
+
+
+Then("the plan key is labelled {string} and explained as {string}", (_w: World, label: string, text: string) => {
+  const key = screen.getByTestId("plan-key");
+  expect(document.getElementById(key.getAttribute("aria-labelledby") ?? "")?.textContent?.trim()).toBe(label);
+  expect(key.closest("div")!.parentElement!.parentElement!.textContent).toContain(text);
+});

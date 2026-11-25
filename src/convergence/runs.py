@@ -48,7 +48,7 @@ from typing import Any
 
 from pubdeploy import machine as need_machine
 
-from .approvals import Ask, JournalRefused, Ledger, nothing_to_fulfil, plan_of, plan_sha256, public
+from .approvals import EMAIL, Ask, JournalRefused, Ledger, nothing_to_fulfil, plan_of, plan_sha256, public
 
 HEAD = "convergence.runs"
 SCHEMA = "convergence-run/1"
@@ -241,6 +241,17 @@ def replay(run: Run) -> None:
                                  "which its machine does not")
             need.state, need.since, need.result = event["to"], event["at"], event.get("result") or ""
             need.seq = int(event.get("need_seq") or need.seq)
+
+
+def actor(by: str, viewer: str = "") -> str:
+    """Who acted, as a reader of the run sees it: "you" for the viewer, "a person" for anyone
+    else signed in (an email, never shown), else the caller's own public() name (a GitHub run,
+    the engine)."""
+    if not by:
+        return ""
+    if viewer and by == viewer:
+        return "you"
+    return "a person" if EMAIL.fullmatch(by) else public(by)
 
 
 def run_key(plan: list[dict[str, str]], needs: dict[str, Need]) -> str:
@@ -530,11 +541,13 @@ class Runs:
 
     # --- What a reader sees
 
-    def view(self, run: Run, since: int = 0) -> dict[str, Any]:
-        """What GET /runs/ID answers: the run, its journal after `since`, all of it public()."""
+    def view(self, run: Run, since: int = 0, viewer: str = "") -> dict[str, Any]:
+        """What GET /runs/ID answers: the run, its journal after `since`, all of it public().
+        Who acted reads "you" for the signed-in `viewer`'s own acts, "a person" for anyone
+        else's: never an email, nor "[someone]"."""
         out = run.record()
-        out["approver"] = public(out["approver"])
-        out["journal"] = [{**e, "by": public(e.get("by", ""))} for e in run.journal if e["seq"] > since]
+        out["approver"] = actor(out["approver"], viewer)
+        out["journal"] = [{**e, "by": actor(e.get("by", ""), viewer)} for e in run.journal if e["seq"] > since]
         out["poll_ms"] = self.poll_ms
         out["stopping"] = bool(run.stopping)  # whether a person pressed Stop: never who
         return out
