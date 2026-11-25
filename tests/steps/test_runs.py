@@ -687,6 +687,12 @@ def journal_says_by(live: Live, said: str) -> None:
     assert WHO not in view
 
 
+@given("the service's pubdeploy has no machine command")
+def machine_too_old(live: Live) -> None:
+    live.world.runner.machines[REPOSITORY] = Ran(
+        2, "", "pubdeploy: error: argument command: invalid choice: 'machine' (choose from 'walk', 'check')\n")
+
+
 @given("pubdeploy compiles a machine it does not run")
 def machine_unrunnable(live: Live) -> None:
     bad = machine(live.needs)
