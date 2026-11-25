@@ -23,9 +23,9 @@ button is for (the service and the unit, or the request and its plan's hash), an
 request must come from this site's own page (Origin), so another site cannot make a
 signed-in browser press a button.
 
-/requests is the one place the proxy lets through without the sign-in
-(k8s/oauth2-proxy.yaml): it reads no X-Forwarded-* header, only the bearer token
-callers.py checks.
+/requests, and a run's executor's paths (GET /runs/ID/executor, POST /runs/ID/events), are
+the places the proxy lets through without the sign-in (k8s/oauth2-proxy.yaml): they read no
+X-Forwarded-* header, only a bearer token (callers.py's, or the run's own).
 """
 
 from __future__ import annotations
@@ -490,6 +490,11 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
 
     # --- Live runs (runs.py): JSON for the run page's poll and buttons, and a remote executor
 
+    def executor_of(run: Any, request: Request) -> bool:
+        """Whether the request is the run's executor: its bearer is the run's token."""
+        scheme, _, given = request.headers.get("authorization", "").partition(" ")
+        return scheme.lower() == "bearer" and bool(run.token) and hmac.compare_digest(given.strip(), run.token)
+
     def run_of(id_: str) -> Any:
         found = runs.get(id_) if runs is not None else None
         if found is None:
@@ -603,11 +608,19 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         mode = body.get("mode") if isinstance(body, dict) else None
         return answered(lambda: {"plan_key": runs.set_mode(run, name, mode, actor)})
 
+    @app.get("/runs/{id_}/executor")
+    def run_for_executor(id_: str, request: Request) -> JSONResponse:
+        """The run, as its remote executor reads it: the run's own bearer token, and no sign-in
+        (oauth2-proxy lets this path through, as it does the events), so no X-Forwarded-* is read."""
+        run = run_of(id_)
+        if not executor_of(run, request):
+            return JSONResponse({"refused": "not-this-runs-executor"}, status_code=403, headers=HEADERS)
+        return JSONResponse(runs.view(run), headers=HEADERS)
+
     @app.post("/runs/{id_}/events")
     async def run_event(id_: str, request: Request) -> JSONResponse:
         run = run_of(id_)
-        scheme, _, given = request.headers.get("authorization", "").partition(" ")
-        if scheme.lower() != "bearer" or not run.token or not hmac.compare_digest(given.strip(), run.token):
+        if not executor_of(run, request):
             return JSONResponse({"refused": "not-this-runs-executor"}, status_code=403, headers=HEADERS)
         body = await json_of(request)
         return answered(lambda: runs.event(run, body))

@@ -88,7 +88,8 @@ Open without the sign-in, for callers with a bearer token (oauth2-proxy's
 
 | Path | What |
 |---|---|
-| `POST /runs/ID/events` | a remote executor's event, `{seq, need, from, to, result?, at}`, with the run's own bearer token: `seq` is the need's own, one more than its last, and `from` its state (409 otherwise); idempotent on the need and its seq |
+| `GET /runs/ID/executor` | the run as its remote executor (`pubdeploy executor`) reads it, with the run's own bearer token (403 otherwise): what `GET /runs/ID` answers, with `stopping` and `cancelled`, the needs a person cancelled by name |
+| `POST /runs/ID/events` | a remote executor's event, `{seq, need, from, to, result?, at}`, with the run's own bearer token: `seq` is the need's own, one more than its last, and `from` its state (409 otherwise); idempotent on the need and its seq. Its last, `{"executor_exit": CODE, "result": "..."}`, ends the run as its needs are: one it left walking fails and one left waiting stops ("executor lost"); an exit after the run ended changes nothing |
 | `POST /requests` | a caller's request, JSON: `{"kind": "fulfil", "unit": "U"}` (with `"mode": "live"` and maybe `"modes": {NEED: "check"\|"fulfil"}`, a live run), `{"kind": "check", "unit": "U"}` (read-only: the plan walk, then done with each need's state, asking no one) or `{"kind": "gate", "plan": "text"}`; 201 with the request, or 4xx/503 with `{"refused": "<reason>"}` and nothing stored |
 | `GET /requests/ID` | the request's state, its plan (each need's name, state and what the fulfil changes) and result (every need's name, type, grade, state and what the walk found, the error, or a note), for the identity that asked: the same run, or the same ServiceAccount; poll every 15 s. It never names who approved it (a run's log may be public): the page and the journal do |
 

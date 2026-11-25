@@ -278,3 +278,14 @@ def nothing_walked(world: World) -> None:
 @then(parsers.parse('the engine\'s problem reads "{text}"'))
 def problem_reads(world: World, text: str) -> None:
     assert text in world.engine.status.problem, world.engine.status.problem
+
+
+@given("a round is running")
+def round_running(world: World) -> None:
+    world.engine._running.acquire()  # noqa: SLF001 - a round, holding the lock it takes
+
+
+@then("the listing did nothing, and said it was not needed")
+def listing_skipped(ctx, world: World) -> None:
+    world.engine._running.release()  # noqa: SLF001
+    assert ctx.result is False and world.engine.status.services == {}

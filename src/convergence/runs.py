@@ -119,7 +119,8 @@ class Run:
     parallel: int = 4
     stopping: str = ""  # who asked to stop it
     approver: str = ""
-    token: str = ""  # a remote executor's bearer for POST /runs/ID/events: never kept or shown
+    token: str = ""  # a remote executor's bearer for GET /runs/ID and its events: never kept or shown
+    cancelled: list[str] = field(default_factory=list)  # needs a person cancelled by name, for a remote executor
     documents: list[dict[str, Any]] = field(default_factory=list)  # the needs' journals, for the facts
 
     @property
@@ -134,7 +135,8 @@ class Run:
                 "plan_key": self.plan_key, "needs": {k: n.view() for k, n in self.needs.items()},
                 "journal": self.journal, "image": self.image, "created_at": _iso(self.created_at),
                 "expires_at": _iso(self.expires_at), "github_run_url": self.github_run_url,
-                "parallel": self.parallel, "approver": self.approver, "modes": self.modes}
+                "parallel": self.parallel, "approver": self.approver, "modes": self.modes,
+                "cancelled": self.cancelled}
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> Run:
@@ -143,7 +145,8 @@ class Run:
                   machine=data.get("machine"), plan=data.get("plan") or [], plan_key=data.get("plan_key", ""),
                   journal=data.get("journal") or [], image=data.get("image", ""),
                   github_run_url=data.get("github_run_url", ""), parallel=data.get("parallel", 4),
-                  approver=data.get("approver", ""), modes=data.get("modes") or {})
+                  approver=data.get("approver", ""), modes=data.get("modes") or {},
+                  cancelled=list(data.get("cancelled") or []))
         if run.machine:
             run.needs = needs_of_machine(run.machine, run.modes)
         replay(run)
@@ -423,6 +426,8 @@ class Runs:
     def event(self, run: Run, body: Any) -> dict[str, Any]:
         """A remote executor's event (POST /runs/ID/events): its seq is the need's own, one more than
         the need's last, and its from the need's state; idempotent on the need and that seq."""
+        if isinstance(body, dict) and isinstance(body.get("executor_exit"), int) and "need" not in body:
+            return self.exited(run, body["executor_exit"], str(body.get("result") or ""))
         if not isinstance(body, dict) or not isinstance(body.get("seq"), int) or body.get("need") not in run.needs:
             raise Refusal(400, "an event names a seq, a need of the run, from and to")
         with self.lock:
@@ -493,14 +498,35 @@ class Runs:
         with self.lock:
             self._note(run, {"need": name, "from": need.state, "to": need.state, "by": actor,
                              "result": f"cancelled, warned: {need.stop_warning}"})
+            if name not in run.cancelled:
+                run.cancelled.append(name)
         self.executor.stop(run, need, cancel=True)
+
+    def exited(self, run: Run, code: int, said: str) -> dict[str, Any]:
+        """A remote executor's last event, its exit: the run ends as its needs leave it. A need it
+        left walking fails and one left waiting stops, "executor lost" (it exited before them).
+        Said once: an exit after the run ended is noted and changes nothing."""
+        with self.lock:
+            event = self._note(run, {"need": "", "from": run.state, "to": "executor exit", "by": "executor",
+                                     "result": f"exit {code}" + (f": {said}" if said else "")})
+            if run.state != "running":
+                return event
+            for need in run.needs.values():
+                if not need.ended:
+                    self._move(run, need, "failed" if need.state in ("checking", "fulfilling") else "stopped",
+                               "engine", f"executor lost: it exited ({code}) before this need ended")
+        self.ended_walking(run)
+        return event
 
     # --- The end
 
     def ended_walking(self, run: Run) -> None:
         """The executor's end: stopped when a person stopped it; failed when a need failed, was
         blocked or cancelled; done otherwise, noting each need left unknown (the walk could not
-        judge it), as a check of the service's needs does."""
+        judge it), as a check of the service's needs does. Nothing, once the run has ended (a
+        remote executor's exit may have ended it first)."""
+        if run.ended:
+            return
         def named(states: tuple[str, ...]) -> str:
             return ", ".join(f"{n.name} {n.state}" for n in run.needs.values() if n.state in states)
         bad, unknown = named(("failed", "blocked", "stopped")), named(("unknown",))
@@ -537,4 +563,5 @@ class Runs:
         out["journal"] = [{**e, "by": public(e.get("by", ""))} for e in run.journal if e["seq"] > since]
         out["poll_ms"] = self.poll_ms
         out["stopping"] = bool(run.stopping)  # whether a person pressed Stop: never who
+        out["cancelled"] = list(run.cancelled)  # the needs cancelled by name, which a remote executor ends
         return out

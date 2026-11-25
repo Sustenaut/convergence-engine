@@ -166,3 +166,8 @@ Feature: Rounds of read-only walks
     Given git cannot clone Sustenaut/notifier: "repository not found"
     When the engine starts and lists the services
     Then it lists Sustenaut/notifier with no units
+
+  Scenario: The list at start waits for no round: while one runs, the round lists them itself
+    Given a round is running
+    When the engine starts and lists the services
+    Then the listing did nothing, and said it was not needed
