@@ -42,7 +42,9 @@ A round runs after that wait and then every 30 minutes, one service after anothe
    `k8s/admin/cluster-role.yaml` grants and, in the namespaces
    `k8s/admin/secret-readers.yaml` lists, Secrets' key names and lengths. That file
    is generated from the service list, with every service checked out beside this
-   repository: `python -m convergence secret-readers ../release-state/state.json ..`.
+   repository: `python -m convergence secret-readers ../release-state/state.json ..`;
+   `k8s/admin/executor-accounts.yaml` (the Job executor's accounts) is generated the same
+   way, with `executor-accounts`, whenever the service list changes.
 4. **The journal.** pubdeploy writes each unit's deploy-journal/2 document to
    storage's private tenant `plane` and moves the unit's head
    (`<owner>.<repository>.<unit>`) to it, as from a laptop, with `from: plane` and
@@ -192,7 +194,12 @@ owns, so both go when the Job does (`ttlSecondsAfterFinished` a day; `backoffLim
 ServiceAccount `pubdeploy-executor`, with the namespace's own Secret `pubdeploy-executor`, if
 there is one, as its environment (a private repository's `GITHUB_TOKEN`, a `BWS_ACCESS_TOKEN`,
 what the namespace's fulfils need): the engine hands over the run's id and token and nothing
-else. In `CONVERGENCE_IMAGE` (the thin image `executor/Dockerfile` builds: Python, uv, git,
+else. The ServiceAccount and its RBAC are `k8s/admin/executor-accounts.yaml`, generated
+from the service list (`python -m convergence executor-accounts ../release-state/state.json ..`)
+as `secret-readers.yaml` is, and applied with it: in each deploy namespace but the engine's
+own (its admission policy refuses the engine's writes there, so the engine is never walked by
+a Job), the reads a walk's checks make and the writes its fulfils make, in that namespace
+alone. The Secret of credentials is the namespace's to make. In `CONVERGENCE_IMAGE` (the thin image `executor/Dockerfile` builds: Python, uv, git,
 kubectl, kustomize, gh, bws, terraform, psql) it checks the repository out at the commit of
 main the engine's clone was at, which the run records, and runs that commit's own
 `./pubdeploy executor --engine SITE --run ID`, so the service's pins of pubdeploy and its

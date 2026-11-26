@@ -10,7 +10,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from pytest_bdd import given, parsers, scenarios, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence.__main__ import main
 from convergence.config import settings
@@ -85,3 +85,17 @@ def pointed(ctx) -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     ctx.attempt(lambda: module.mirrored(ctx.lock))
+
+
+ADMIN = Path(__file__).parent.parent.parent / "k8s" / "admin"
+
+
+@then(parsers.parse('executor-accounts.yaml has a Job account in each namespace secret-readers.yaml binds, but "{own}"'))
+def executor_accounts_file(own: str) -> None:
+    import re  # noqa: PLC0415
+
+    def named(name: str) -> set[str]:
+        return set(re.findall(r"^  namespace: (\S+)$", (ADMIN / name).read_text(encoding="utf-8"), re.M))
+    readers = named("secret-readers.yaml")
+    assert own in readers
+    assert named("executor-accounts.yaml") == readers - {own}

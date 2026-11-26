@@ -75,6 +75,10 @@
       },
       {
         "type": "k8s.manifests",
+        "path": "k8s/admin/executor-accounts.yaml"
+      },
+      {
+        "type": "k8s.manifests",
         "path": "k8s/admin/write-role.yaml"
       },
       {
