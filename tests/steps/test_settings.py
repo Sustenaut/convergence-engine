@@ -95,12 +95,8 @@ def admin_files(ctx) -> None:
     ctx.admin = {p.name: p.read_text(encoding="utf-8") for p in ADMIN.glob("*.yaml")}
 
 
-@then(parsers.parse('executor-accounts.yaml has a Job account in each namespace secret-readers.yaml binds, but "{own}"'))
-def executor_accounts_file(ctx, own: str) -> None:
-    import re  # noqa: PLC0415
-
-    def named(name: str) -> set[str]:
-        return set(re.findall(r"^  namespace: (\S+)$", ctx.admin[name], re.M))
-    readers = named("secret-readers.yaml")
-    assert own in readers
-    assert named("executor-accounts.yaml") == readers - {own}
+@then("executor-accounts.yaml is what executor-accounts makes of secret-readers.yaml")
+def executor_accounts_file(ctx) -> None:
+    from convergence.readers import executors  # noqa: PLC0415
+    assert ctx.admin["executor-accounts.yaml"] == executors(ctx.admin["secret-readers.yaml"])
+    assert "namespace: notifier" in ctx.admin["executor-accounts.yaml"]

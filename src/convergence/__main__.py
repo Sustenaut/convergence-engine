@@ -2,7 +2,7 @@
 
 `python -m convergence secret-readers STATE.json CHECKOUTS`: k8s/admin/secret-readers.yaml.
 
-`python -m convergence executor-accounts STATE.json CHECKOUTS`: k8s/admin/executor-accounts.yaml.
+`python -m convergence executor-accounts`: k8s/admin/executor-accounts.yaml, from secret-readers.yaml.
 
 The pod runs the pages and the rounds (convergence.main); this is for a person
 checking a state file before it lands.
@@ -16,13 +16,21 @@ from pathlib import Path
 from .readers import executors, generate
 from .state import services
 
+READERS = Path("k8s/admin/secret-readers.yaml")  # in the repository's root
+
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) == 3 and args[0] in ("secret-readers", "executor-accounts"):
-        make = generate if args[0] == "secret-readers" else executors
+    if args == ["executor-accounts"]:
         try:
-            print(make(Path(args[1]).read_text(encoding="utf-8"), Path(args[2])), end="")
+            print(executors(READERS.read_text(encoding="utf-8")), end="")
+        except OSError as e:
+            print(f"convergence: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if len(args) == 3 and args[0] == "secret-readers":
+        try:
+            print(generate(Path(args[1]).read_text(encoding="utf-8"), Path(args[2])), end="")
         except (OSError, ValueError) as e:
             print(f"convergence: {e}", file=sys.stderr)
             return 1
