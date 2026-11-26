@@ -27,7 +27,7 @@
             "command": [
               "sh",
               "-c",
-              "set -eu\ngit init -q repo\ncd repo\ngit remote add origin \"https://github.com/$REPOSITORY.git\"\nset --\nif [ -n \"${GITHUB_TOKEN:-}\" ]; then\n  set -- -c \"http.https://github.com/.extraheader=Authorization: Basic $(printf 'x-access-token:%s' \"$GITHUB_TOKEN\" | base64 -w0)\"\nfi\ngit \"$@\" fetch -q --depth 1 --no-tags origin \"$COMMIT\"\ngit checkout -q --detach FETCH_HEAD\nexec ./pubdeploy executor --engine \"$ENGINE\" --run \"$RUN\"\n"
+              "set -eu\nmkdir -p \"$HOME\"\ngit init -q repo\ncd repo\ngit remote add origin \"https://github.com/$REPOSITORY.git\"\nset --\nif [ -n \"${GITHUB_TOKEN:-}\" ]; then\n  set -- -c \"http.https://github.com/.extraheader=Authorization: Basic $(printf 'x-access-token:%s' \"$GITHUB_TOKEN\" | base64 -w0)\"\nfi\ngit \"$@\" fetch -q --depth 1 --no-tags origin \"$COMMIT\"\ngit checkout -q --detach FETCH_HEAD\nexec ./pubdeploy executor --engine \"$ENGINE\" --run \"$RUN\"\n"
             ],
             "env": [
               {

@@ -40,6 +40,7 @@ LABEL = "convergence.sustenaut.eu/run"
 # executor. A namespace's GITHUB_TOKEN (a private repository) reaches git as a header, never
 # in a remote URL.
 SCRIPT = """set -eu
+mkdir -p "$HOME"
 git init -q repo
 cd repo
 git remote add origin "https://github.com/$REPOSITORY.git"
