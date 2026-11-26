@@ -183,6 +183,25 @@ the run's journal, written with the run to storage's head `convergence.runs` (te
 waits on, one that was walking ended with its pod, so its needs not ended fail ("executor
 lost") and nothing walks again. What a run shows is public() (no email, no link).
 
+**The Job executor** (`jobs.py`, `CONVERGENCE_EXECUTOR=job`; the engine's own threads stay
+the default). An approved run is walked by a Kubernetes Job, not by the engine: the engine
+makes the Job `run-<id>` in the namespace of the run's unit (as pubdeploy reads the deploy
+block), and beside it a Secret of the same name holding only the run's token, which the Job
+owns, so both go when the Job does (`ttlSecondsAfterFinished` a day; `backoffLimit` 0;
+`activeDeadlineSeconds` the Fulfil time and 120 s more). The Job runs as the namespace's own
+ServiceAccount `pubdeploy-executor`, with the namespace's own Secret `pubdeploy-executor`, if
+there is one, as its environment (a private repository's `GITHUB_TOKEN`, a `BWS_ACCESS_TOKEN`,
+what the namespace's fulfils need): the engine hands over the run's id and token and nothing
+else. In `CONVERGENCE_IMAGE` (the thin image `executor/Dockerfile` builds: Python, uv, git,
+kubectl, kustomize, gh, bws, terraform, psql) it checks the repository out at the commit of
+main the engine's clone was at, which the run records, and runs that commit's own
+`./pubdeploy executor --engine SITE --run ID`, so the service's pins of pubdeploy and its
+providers decide, as on a laptop. The engine holds the service's walk lock while the Job
+walks and looks at the Job every 10 s: one that failed or is gone, or completed, before its
+executor posted its exit ends the run ("executor lost: its Job ..."), as does a Job the API
+server cannot be asked about three times running. Stop and each cancel reach the Job through
+the run, which its executor reads every 5 s. The engine never reads the Job's logs.
+
 **Fulfil** (step 4b) runs in the service's clone and makes each auto need that is
 missing or drifted. A service is never walked by two at once: a request's walks wait
 for a round or another request to end, and a Fulfil may take
@@ -231,7 +250,8 @@ observability's `OBSERVABILITY_SENDERS`, so rounds that stop show as `sender_sil
 | `CONVERGENCE_REQUEST_OWNERS` | `Sustenaut` | the owners whose repositories' GitHub runs may ask, comma-separated |
 | `CONVERGENCE_REQUESTERS` | none (`integrations:app` in `k8s/engine.yaml`) | the ServiceAccounts, `NAMESPACE:NAME`, that may ask for a gate |
 | `CONVERGENCE_RUN_POLL_MS` | `2000` | how often a live run's page asks for its state |
-| `CONVERGENCE_IMAGE` | none | the image a live run names as the one its needs were walked in |
+| `CONVERGENCE_IMAGE` | none | the image a live run names as the one its needs were walked in; with the Job executor, the Job's image |
+| `CONVERGENCE_EXECUTOR` | `inline` | who walks an approved live run: `inline`, the engine's own threads, or `job`, a Job in the service's namespace (needs `CONVERGENCE_IMAGE`) |
 | `CONVERGENCE_*_FILE`, `CONVERGENCE_GITHUB_APP_DIR` | as `k8s/engine.yaml` mounts them | the credentials |
 
 `python -m convergence services state.json` prints the services a state file lists.

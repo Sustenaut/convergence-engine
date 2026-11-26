@@ -126,7 +126,11 @@ export function RunPage({ initial, mayAct, now = () => Date.now() }: { initial: 
           tone: stateTone[run.state],
         }}
         links={run.github_run_url ? [{ label: "GitHub run", href: run.github_run_url }] : []}
-        facts={[<span key="id" className="font-mono">{run.id}</span>]}
+        facts={[
+          <span key="id" className="font-mono">{run.id}</span>,
+          ...(run.commit ? [<span key="commit" className="font-mono" title={run.commit}>commit {run.commit.slice(0, 12)}</span>] : []),
+          ...(run.commit && run.image ? [<span key="image" className="font-mono">{run.image}</span>] : []),
+        ]}
         explain={explain}
         primary={
           run.mode === "fulfil" && (awaiting || run.state === "planning")

@@ -115,6 +115,7 @@ class Run:
     modes: dict[str, str] = field(default_factory=dict)  # as asked, until the machine gives them
     journal: list[dict[str, Any]] = field(default_factory=list)
     image: str = ""
+    commit: str = ""  # the service's commit its Job walks (a Job executor's run), recorded when the Job is made
     github_run_url: str = ""
     parallel: int = 4
     stopping: str = ""  # who asked to stop it
@@ -133,7 +134,7 @@ class Run:
                 "mode": self.mode, "state": self.state, "machine": self.machine, "plan": [
                     {**n, "change": public(n.get("change", ""))} for n in self.plan],
                 "plan_key": self.plan_key, "needs": {k: n.view() for k, n in self.needs.items()},
-                "journal": self.journal, "image": self.image, "created_at": _iso(self.created_at),
+                "journal": self.journal, "image": self.image, "commit": self.commit, "created_at": _iso(self.created_at),
                 "expires_at": _iso(self.expires_at), "github_run_url": self.github_run_url,
                 "parallel": self.parallel, "approver": self.approver, "modes": self.modes,
                 "cancelled": self.cancelled}
@@ -143,7 +144,7 @@ class Run:
         run = cls(data["id"], data["request_id"], data["repository"], data["unit"], data["mode"],
                   _epoch(data["created_at"]), _epoch(data["expires_at"]), state=data["state"],
                   machine=data.get("machine"), plan=data.get("plan") or [], plan_key=data.get("plan_key", ""),
-                  journal=data.get("journal") or [], image=data.get("image", ""),
+                  journal=data.get("journal") or [], image=data.get("image", ""), commit=data.get("commit", ""),
                   github_run_url=data.get("github_run_url", ""), parallel=data.get("parallel", 4),
                   approver=data.get("approver", ""), modes=data.get("modes") or {},
                   cancelled=list(data.get("cancelled") or []))
@@ -522,12 +523,21 @@ class Runs:
                                      "result": f"exit {code}" + (f": {said}" if said else "")})
             if run.state != "running":
                 return event
+        self.lost(run, f"it exited ({code}) before this need ended")
+        return event
+
+    def lost(self, run: Run, why: str) -> None:
+        """The executor is gone before the run's needs ended (it exited, or its Job failed or is
+        gone): a need it left walking fails and one left waiting stops, "executor lost: WHY", and
+        the run ends as they leave it. Nothing, once the run has ended."""
+        with self.lock:
+            if run.ended:
+                return
             for need in run.needs.values():
                 if not need.ended:
                     self._move(run, need, "failed" if need.state in ("checking", "fulfilling") else "stopped",
-                               "engine", f"executor lost: it exited ({code}) before this need ended")
+                               "engine", f"executor lost: {why}")
         self.ended_walking(run)
-        return event
 
     # --- The end
 

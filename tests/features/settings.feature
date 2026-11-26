@@ -31,6 +31,7 @@ Feature: The services, and the engine's settings
     And the result's "first_round_seconds" is "300"
     And the result's "bitwarden_token" is "null"
     And the result's "requesters" is "[]"
+    And the result's "executor" is "inline"
 
   Scenario: Settings name more state repositories, and a token file
     Given the setting CONVERGENCE_STATES is "Sustenaut/release-state, schryer/release-state-schryer"
@@ -56,6 +57,14 @@ Feature: The services, and the engine's settings
       | CONVERGENCE_EVERY_MINUTES | 1                   | CONVERGENCE_EVERY_MINUTES is at least 5                 |
       | CONVERGENCE_REQUEST_HOURS | 0                   | CONVERGENCE_REQUEST_HOURS is 1 to 168                   |
       | CONVERGENCE_REQUESTERS    | integrations        | CONVERGENCE_REQUESTERS is NAMESPACE:NAME, comma-separated |
+      | CONVERGENCE_EXECUTOR      | pod                 | CONVERGENCE_EXECUTOR is inline or job                   |
+      | CONVERGENCE_EXECUTOR      | job                 | CONVERGENCE_EXECUTOR job needs CONVERGENCE_IMAGE, the executor's image |
+
+  Scenario: An approved run walks inline unless the settings name the Job executor and its image
+    Given the setting CONVERGENCE_EXECUTOR is "job"
+    And the setting CONVERGENCE_IMAGE is "ghcr.io/sustenaut/convergence-executor:abc"
+    When the settings are read
+    Then the result's "executor" is "job"
 
   Scenario: `python -m convergence services` prints a state file's services
     Given a scratch directory

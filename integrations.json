@@ -4,6 +4,7 @@
       "plugin": "bitwarden.secrets",
       "paths": [
         ".github/workflows/deploy.yml",
+        ".github/workflows/executor-image.yml",
         "src/convergence/walker.py",
         "with-secrets.json"
       ],
@@ -29,9 +30,13 @@
       "plugin": "github.ghcr",
       "paths": [
         ".github/workflows/deploy.yml",
+        ".github/workflows/executor-image.yml",
         "Dockerfile",
+        "executor/Dockerfile",
         "k8s/engine.yaml",
-        "k8s/kustomization.yaml"
+        "k8s/kustomization.yaml",
+        "tests/golden/job.json",
+        "tests/steps/test_runs.py"
       ],
       "mode": "required"
     },
@@ -39,6 +44,7 @@
       "plugin": "github.repo-ops",
       "paths": [
         ".github/workflows/deploy.yml",
+        ".github/workflows/executor-image.yml",
         "src/convergence/walker.py"
       ],
       "mode": "required"

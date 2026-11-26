@@ -49,8 +49,11 @@ def build():  # pragma: no cover - the pod's wiring, with real files and the net
     # Fail closed: a head storage will not read stops the start, so no request is lost.
     approvals = Approvals(engine, Ledger(plane), hours=s.request_hours)
     from .executor import Executor
+    from .jobs import Kubectl, factory
     from .runs import HEAD as RUNS, Runs
-    runs = Runs(approvals, Ledger(plane, head=RUNS, name="run.json"), Executor, image=s.image,
+    executor = Executor if s.executor == "inline" else \
+        factory(Kubectl(base), engine_url=s.site, deadline_seconds=s.fulfil_seconds)
+    runs = Runs(approvals, Ledger(plane, head=RUNS, name="run.json"), executor, image=s.image,
                 poll_ms=s.run_poll_ms)
     approvals.start()
     runs.start()

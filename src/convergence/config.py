@@ -56,6 +56,9 @@ class Settings:
     # Live runs (runs.py): how often the run page polls, and the image the executor walks in.
     run_poll_ms: int = 2000
     image: str = ""
+    # Who walks an approved run: "inline", the engine's own threads, or "job", a Job in the
+    # service's namespace (jobs.py), which needs the image.
+    executor: str = "inline"
 
 
 def _slug(value: str, what: str) -> str:
@@ -87,6 +90,11 @@ def settings(env: Mapping[str, str]) -> Settings:
     requesters = tuple(r.strip() for r in env.get("CONVERGENCE_REQUESTERS", "").split(",") if r.strip())
     if not all(NAMESPACED.fullmatch(r) for r in requesters):
         raise ValueError("CONVERGENCE_REQUESTERS is NAMESPACE:NAME, comma-separated")
+    executor = env.get("CONVERGENCE_EXECUTOR", "inline")
+    if executor not in ("inline", "job"):
+        raise ValueError("CONVERGENCE_EXECUTOR is inline or job")
+    if executor == "job" and not env.get("CONVERGENCE_IMAGE"):
+        raise ValueError("CONVERGENCE_EXECUTOR job needs CONVERGENCE_IMAGE, the executor's image")
     owners = tuple(o.strip() for o in env.get("CONVERGENCE_REQUEST_OWNERS", "Sustenaut").split(",") if o.strip())
     return Settings(
         states=states, zones=zones,
@@ -105,4 +113,5 @@ def settings(env: Mapping[str, str]) -> Settings:
         google_read_token=Path(env.get("CONVERGENCE_GOOGLE_READ_TOKEN_FILE", "/var/run/secrets/google-read/token")),
         site=env.get("CONVERGENCE_SITE", "https://convergence.sustenaut.eu").rstrip("/"),
         request_hours=hours, request_owners=owners, requesters=requesters,
-        run_poll_ms=int(env.get("CONVERGENCE_RUN_POLL_MS", "2000")), image=env.get("CONVERGENCE_IMAGE", ""))
+        run_poll_ms=int(env.get("CONVERGENCE_RUN_POLL_MS", "2000")), image=env.get("CONVERGENCE_IMAGE", ""),
+        executor=executor)

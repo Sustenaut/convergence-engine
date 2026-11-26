@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from pubdeploy import machine as need_machine
+from pubdeploy import units as deploy_units
 
 from . import facts, state, walker
 from .clones import CloneFailed, Clones
@@ -281,6 +282,22 @@ class Engine:
         if bad := need_machine.validate(machine):  # what the engine's pubdeploy runs, it must read
             return f"pubdeploy machine gave a machine this engine does not run ({'; '.join(bad)[:300]})"
         return machine
+
+    def job_place(self, repository: str, unit: str) -> tuple[str, str]:
+        """Where a live run's Job walks the unit, and what: the unit's namespace, as pubdeploy reads
+        the repository's deploy block, and the commit of main the engine's clone is at now, which
+        the Job checks out. A ValueError says why there is none."""
+        clone = self.clones.refresh(repository, self.github_token())
+        try:
+            block = json.loads((clone / walker.CONFIG).read_text(encoding="utf-8"))["deploy"]
+            namespace = deploy_units.unit_block(block, unit)["namespace"]
+        except (OSError, ValueError, KeyError, TypeError):
+            raise ValueError(f"{walker.CONFIG} gives the unit {unit} no namespace") from None
+        ran = self.clones.runner(["git", "rev-parse", "HEAD"], clone, self.clones.base_env, 30)
+        commit = ran.stdout.strip()
+        if ran.code != 0 or len(commit) != 40:
+            raise ValueError("the clone's commit could not be read")
+        return namespace, commit
 
     def need_command(self, repository: str, unit: str, need: str, fulfil: bool, budget: float,
                      by: str) -> tuple[list[str], Path, dict[str, str]]:

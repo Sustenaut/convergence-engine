@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 from convergence.approvals import Ledger
 from convergence.clones import Ran
 from convergence.executor import Executor, Popen
+from convergence.jobs import factory, job_name
 from convergence.journals import Journals
 from convergence.page import create_app
 from convergence.runs import HEAD, Runs
@@ -29,6 +31,7 @@ from .world import REPOSITORY, SITE, WHO, World, answered, person
 
 scenarios("runs.feature")
 scenarios("runpage.feature")
+scenarios("jobs.feature")
 
 WARNING = "it migrates the database"
 
@@ -110,6 +113,12 @@ class Live:
 
     def runs_for(self, storage: Storage) -> Runs:
         w = self.world
+        kube = getattr(self, "kube", None)
+        if kube is not None:
+            return Runs(w.approvals, Ledger(storage, head=HEAD, name="run.json"),
+                        factory(kube, engine_url=SITE, deadline_seconds=1200, watch=0.01, lock_seconds=0.3),
+                        image="ghcr.io/sustenaut/convergence-executor:1", poll_ms=2000, log=w.lines.append,
+                        clock=lambda: w.now)
         return Runs(w.approvals, Ledger(storage, head=HEAD, name="run.json"),
                     lambda runs: Executor(runs, spawn=self.spawn, lock_seconds=0.3, slice_=0.01),
                     image="registry.example/engine:1", poll_ms=2000, log=w.lines.append, clock=lambda: w.now)
@@ -1045,3 +1054,197 @@ def no_email_actor(live: Live) -> None:
     for who in (WHO, "other@example.org"):
         for e in _poll_by(live, who):
             assert "@" not in e["by"] and "[someone]" not in e["by"], e
+
+
+# --- The Job executor (jobs.feature)
+
+GOLDEN = Path(__file__).parent.parent / "golden" / "job.json"
+
+
+class Kube:
+    """The API server, as the Job executor asks it: what it was asked to make, and the Jobs."""
+
+    def __init__(self) -> None:
+        self.made: list[dict] = []
+        self.jobs: dict[tuple[str, str], dict] = {}
+        self.refuse = ""
+        self.unreadable = 0
+        self.changed = threading.Condition()
+
+    def create(self, manifest: dict) -> dict:
+        if self.refuse:
+            raise RuntimeError(self.refuse)
+        meta = manifest["metadata"]
+        made = {**manifest, "metadata": {**meta, "uid": f"uid-{len(self.made) + 1}"}}
+        with self.changed:
+            self.made.append(manifest)
+            if manifest["kind"] == "Job":
+                self.jobs[(meta["namespace"], meta["name"])] = made
+            self.changed.notify_all()
+        return made
+
+    def job(self, namespace: str, name: str) -> dict | None:
+        if self.unreadable:
+            self.unreadable -= 1
+            raise RuntimeError("the API server did not answer")
+        return self.jobs.get((namespace, name))
+
+    def of(self, kind: str) -> list[dict]:
+        return [m for m in self.made if m["kind"] == kind]
+
+
+def _made(live: Live) -> dict:
+    """The run's Job, once the executor has made it (and its Secret, made just after)."""
+    with live.kube.changed:
+        assert live.kube.changed.wait_for(lambda: len(live.kube.made) >= 2, timeout=10), live.kube.made
+    return live.kube.of("Job")[0]
+
+
+def _deploy_block(live: Live, block: dict) -> None:
+    live.world.runner.configs[REPOSITORY] = json.dumps({"deploy": block})
+
+
+@given(parsers.parse("the Job executor, and the live needs {found}"))
+def job_executor(live: Live, found: str) -> None:
+    live.kube = Kube()
+    _deploy_block(live, {"namespace": "notifier"})
+    live_needs(live, found)
+
+
+@given("the cluster refuses to make it")
+def cluster_refuses(live: Live) -> None:
+    live.kube.refuse = "jobs.batch is forbidden"
+
+
+@given("the service's deploy block names no such unit")
+def no_such_unit(live: Live) -> None:
+    _deploy_block(live, {"namespace": "other"})
+
+
+@given("the clone's commit cannot be read")
+def no_commit(live: Live) -> None:
+    live.world.runner.commits[REPOSITORY] = ""
+
+
+@given("the engine names no executor image")
+def no_image(live: Live) -> None:
+    live.runs.image = ""
+
+
+@when("a second GitHub run asks for a live check")
+def asks_second(live: Live) -> None:
+    live.first = live.run
+    asks_live(live, "check", None)
+
+
+@when(parsers.parse("its Job {ends}"))
+def job_ends(live: Live, ends: str) -> None:
+    job = _made(live)
+    key = (job["metadata"]["namespace"], job["metadata"]["name"])
+    conditions = {"completes": {"type": "Complete", "status": "True"},
+                  "fails, as DeadlineExceeded": {"type": "Failed", "status": "True", "reason": "DeadlineExceeded"},
+                  "fails, saying no reason": {"type": "Failed", "status": "True"}}
+    if ends in conditions:
+        stored = live.kube.jobs[key]
+        live.kube.jobs[key] = {**stored, "status": {"conditions": [{"type": "Suspended", "status": "False"},
+                                                                    conditions[ends]]}}
+    elif ends == "is gone":
+        del live.kube.jobs[key]
+    elif ends == "cannot be read once":
+        live.kube.unreadable = 1
+    else:
+        assert ends == "cannot be read, again and again", ends
+        live.kube.unreadable = 99
+
+
+@then("the engine made the Job, as tests/golden/job.json has it for the run")
+def job_golden(live: Live) -> None:
+    job = _made(live)
+    text = json.dumps(job, indent=2, sort_keys=True).replace(live.run.id.lower(), "<id>").replace(live.run.id, "<id>")
+    if os.environ.get("UPDATE_GOLDEN"):
+        GOLDEN.write_text(text + "\n")
+    assert text + "\n" == GOLDEN.read_text(), text
+    assert job["metadata"]["name"] == job_name(live.run.id)
+
+
+@then(parsers.parse('it made the Secret "run-<id>" in "{namespace}", owned by the Job, holding only the run\'s token'))
+def token_secret(live: Live, namespace: str) -> None:
+    _made(live)
+    secret, = live.kube.of("Secret")
+    name = job_name(live.run.id)
+    assert secret["metadata"]["name"] == name and secret["metadata"]["namespace"] == namespace
+    assert secret["metadata"]["ownerReferences"] == [{"apiVersion": "batch/v1", "kind": "Job", "name": name,
+                                                      "uid": "uid-1"}]
+    assert secret["data"] == {"token": base64.b64encode(live.run.token.encode()).decode()}
+
+
+@then("neither names a credential of the engine's")
+def no_engine_credential(live: Live) -> None:
+    made = json.dumps(live.kube.made)
+    for credential in ("ghs_read", "ghs_write", "bws-write", "storage-token"):
+        assert credential not in made, credential
+
+
+@then(parsers.parse('the run records the commit "{commit}" and the image "{image}"'))
+def records_commit(live: Live, commit: str, image: str) -> None:
+    _made(live)
+    assert live.run.commit == commit and live.run.image == image
+    assert live.run.record()["commit"] == commit
+
+
+@then(parsers.parse('the journal notes "{said}"'))
+def journal_notes(live: Live, said: str) -> None:
+    said = said.replace("<id>", live.run.id.lower())
+    with live.runs.changed:
+        assert live.runs.changed.wait_for(lambda: any(said in (e.get("result") or "") for e in live.run.journal),
+                                          timeout=10), live.run.journal
+
+
+@then("nothing was walked by the engine itself")
+def engine_walked_nothing(live: Live) -> None:
+    assert live.spawn.calls == []
+
+
+@then("the service's walk lock is free again")
+def lock_free(live: Live) -> None:
+    live.runs.executor.wait()
+    lock = live.world.engine.walking(REPOSITORY)
+    assert lock.acquire(blocking=False)
+    lock.release()
+
+
+@then("the first run's token is refused on the second run's executor read and events, with 403")
+def token_scope(live: Live) -> None:
+    other = {"Authorization": f"Bearer {live.first.token}"}
+    client = live.world.client
+    assert client.get(f"/runs/{live.run.id}/executor", headers=other).status_code == 403
+    event = {"seq": 1, "need": "k8s.secret:a", "from": "waiting", "to": "checking"}
+    assert client.post(f"/runs/{live.run.id}/events", json=event, headers=other).status_code == 403
+    assert live.run.needs["k8s.secret:a"].state == "waiting"
+    own = {"Authorization": f"Bearer {live.first.token}"}
+    assert client.get(f"/runs/{live.first.id}/executor", headers=own).status_code == 200
+
+
+@then("the run, read with its token, says it is stopping")
+def reads_stopping(live: Live) -> None:
+    assert _read_as_executor(live, live.run.token).json()["stopping"] is True
+
+
+@then("the Job is still there")
+def job_still_there(live: Live) -> None:
+    job = _made(live)
+    assert (job["metadata"]["namespace"], job["metadata"]["name"]) in live.kube.jobs
+    assert not live.run.ended
+
+
+@then("no Job was made")
+def no_job(live: Live) -> None:
+    live.runs.executor.wait()
+    assert live.kube.made == []
+
+
+@then("a Job that ends now changes nothing on the ended run")
+def lost_late(live: Live) -> None:
+    before = (live.run.state, [e["seq"] for e in live.run.journal])
+    live.runs.lost(live.run, "its Job is gone")
+    assert (live.run.state, [e["seq"] for e in live.run.journal]) == before

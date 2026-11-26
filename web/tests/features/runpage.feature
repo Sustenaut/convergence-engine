@@ -84,6 +84,13 @@ Feature: The live run page in a browser
     When Start a run is drawn
     Then the page says "The engine lists no repository yet" and links to the overview
 
+  Scenario: A run a Job walks shows the commit it walks and the image it walks in
+    Given a run awaiting approval, with a need to fulfil and a need for a person
+    And the run is walked by a Job at commit "0123456789abcdef0123456789abcdef01234567" in the image "ghcr.io/sustenaut/convergence-executor:1"
+    When the page is drawn
+    Then the header says "commit 0123456789ab"
+    And the header says "ghcr.io/sustenaut/convergence-executor:1"
+
   Scenario: A run that failed says why, in its header and its journal
     Given a run that failed at its plan, saying "this service's pubdeploy compiles no machine"
     When the page is drawn
