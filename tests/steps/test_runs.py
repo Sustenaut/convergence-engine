@@ -974,3 +974,28 @@ def needs_read(live: Live, listed: str) -> None:
     assert live.answer.status_code == 200, live.answer.text
     got = ", ".join(f"{n['name']} {n['mode']}" for n in live.answer.json()["needs"])
     assert got == listed
+
+
+def _poll_by(live: Live, who: str) -> list[dict]:
+    live.world.approvals.wait()
+    answer = live.world.client.get(f"/runs/{live.run.id}?since=0", headers=person(who))
+    return answer.json()["journal"]
+
+
+@then(parsers.parse('the run\'s poll, for the person who approved it, says the approval was by "{by}"'))
+def approved_by_viewer(live: Live, by: str) -> None:
+    journal = _poll_by(live, WHO)
+    assert any(e["to"] == "approved" and e["by"] == by for e in journal), journal
+
+
+@then(parsers.parse('the run\'s poll, for another person, says the approval was by "{by}"'))
+def approved_by_other(live: Live, by: str) -> None:
+    journal = _poll_by(live, "other@example.org")
+    assert any(e["to"] == "approved" and e["by"] == by for e in journal), journal
+
+
+@then('no poll names an email or "[someone]" as who acted')
+def no_email_actor(live: Live) -> None:
+    for who in (WHO, "other@example.org"):
+        for e in _poll_by(live, who):
+            assert "@" not in e["by"] and "[someone]" not in e["by"], e

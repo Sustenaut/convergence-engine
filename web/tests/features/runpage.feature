@@ -8,6 +8,7 @@ Feature: The live run page in a browser
     And the engine answers a mode switch with the plan_key "c9f1"
     When the page is drawn
     Then the plan_key reads "b7e2"
+    And the plan key is labelled "Plan key" and explained as "Approve approves exactly this plan"
     And the plan reads "2 needs · 1 to fulfil · 0 check only · 1 needs a person"
     When the person switches "ingest-token" to "Check"
     Then the page told the engine "POST" "/runs/r1/needs/ingest-token/mode" with '{"mode":"check"}'

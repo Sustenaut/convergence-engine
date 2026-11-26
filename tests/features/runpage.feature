@@ -67,3 +67,11 @@ Feature: The live run's page
     And the engine has no live runs
     When a person opens "/runs/new"
     Then it answers 503
+
+  Scenario: Who acted reads "you" for the viewer and "a person" for anyone else, never an email
+    Given the live needs "k8s.secret:a" missing
+    When a GitHub run asks for a live fulfil
+    And the person approves the run
+    Then the run's poll, for the person who approved it, says the approval was by "you"
+    And the run's poll, for another person, says the approval was by "a person"
+    And no poll names an email or "[someone]" as who acted
