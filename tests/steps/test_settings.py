@@ -90,12 +90,17 @@ def pointed(ctx) -> None:
 ADMIN = Path(__file__).parent.parent.parent / "k8s" / "admin"
 
 
+@when("the repository's k8s/admin files are read")
+def admin_files(ctx) -> None:
+    ctx.admin = {p.name: p.read_text(encoding="utf-8") for p in ADMIN.glob("*.yaml")}
+
+
 @then(parsers.parse('executor-accounts.yaml has a Job account in each namespace secret-readers.yaml binds, but "{own}"'))
-def executor_accounts_file(own: str) -> None:
+def executor_accounts_file(ctx, own: str) -> None:
     import re  # noqa: PLC0415
 
     def named(name: str) -> set[str]:
-        return set(re.findall(r"^  namespace: (\S+)$", (ADMIN / name).read_text(encoding="utf-8"), re.M))
+        return set(re.findall(r"^  namespace: (\S+)$", ctx.admin[name], re.M))
     readers = named("secret-readers.yaml")
     assert own in readers
     assert named("executor-accounts.yaml") == readers - {own}

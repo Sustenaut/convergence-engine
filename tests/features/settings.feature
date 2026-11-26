@@ -157,6 +157,7 @@ Feature: The services, and the engine's settings
     And it does not print "namespace:"
 
   Scenario: k8s/admin/executor-accounts.yaml names the namespaces secret-readers.yaml does, but the engine's
+    When the repository's k8s/admin files are read
     Then executor-accounts.yaml has a Job account in each namespace secret-readers.yaml binds, but "convergence"
 
   Scenario: A service not checked out beside the others fails the generation
