@@ -240,8 +240,8 @@ opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
     # via fastapi
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl \
-    --hash=sha256:d783284288181f025e11d64505c1a28cf52ba24231d5309e03d1073914cfa457
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl \
+    --hash=sha256:b51b7551a0da6cc9165e3429f443a0a3b9a2a311871f759fb27d11d68501aed2
     # via -r requirements.in
 pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
@@ -393,8 +393,9 @@ pydantic-core==2.50.4 \
     --hash=sha256:fc04affef30be98c1f36f0c422a4061ef618fdc1dde79f5ad5458dd496fecffa \
     --hash=sha256:ffb616d8d55965839670301dc3bae3abacff560a7e137a89056058a8a9da4d96
     # via pydantic
-python-statemachine @ https://files.pythonhosted.org/packages/85/d1/d722672f4bfbe1176588157e0f9fa6dd5331a71922bed36aca0e79271535/python_statemachine-3.2.2-py3-none-any.whl#sha256=141d20e00776815692e424d3df825b1bd7ccaeedc6fda7787ddf249e767e1676 \
-    --hash=sha256:141d20e00776815692e424d3df825b1bd7ccaeedc6fda7787ddf249e767e1676
+python-statemachine==3.2.2 \
+    --hash=sha256:141d20e00776815692e424d3df825b1bd7ccaeedc6fda7787ddf249e767e1676 \
+    --hash=sha256:5968c5e07a537f7531b8b1d0a0d5067a3452c88941fa0ac6c244870d48f78325
     # via pubdeploy
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
