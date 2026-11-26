@@ -7,6 +7,11 @@
 # Build from the repository's root:
 #   podman build -f executor/Dockerfile -t convergence-executor .
 FROM python:3.14-slim
+# The source links the new package ghcr.io/sustenaut/convergence-executor to this repository on
+# its first push, so this repository's workflow token may push it (without it GHCR denies it).
+LABEL org.opencontainers.image.source="https://github.com/Sustenaut/convergence-engine" \
+      org.opencontainers.image.description="The thin image a convergence engine live run's Job walks in." \
+      org.opencontainers.image.licenses="Apache-2.0"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 ARG KUBECTL=v1.37.2 KUBECTL_SHA256=c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
 ARG KUSTOMIZE=5.8.3 KUSTOMIZE_SHA256=cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
