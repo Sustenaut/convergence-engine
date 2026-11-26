@@ -42,9 +42,12 @@ class Runner:
         self.failing: dict[str, str] = {}  # repository -> git's last words
         self.states: dict[str, str] = {}  # state repository -> state.json
         self.configs: dict[str, str] = {}  # repository -> its pubrules.json, written into its clone
+        self.commits: dict[str, str] = {}  # repository -> what `git rev-parse HEAD` prints in its clone
 
     def __call__(self, argv: list[str], cwd: Path, env, timeout: float) -> Ran:
         self.calls.append((list(argv), cwd, dict(env)))
+        if argv[:2] == ["git", "rev-parse"]:
+            return Ran(0, self.commits.get(f"{cwd.parent.name}/{cwd.name}", "c" * 40) + "\n", "")
         if argv[0] == "git":
             slug = argv[-2].removeprefix("https://github.com/").removesuffix(".git") if argv[1] == "clone" \
                 else f"{cwd.parent.name}/{cwd.name}"

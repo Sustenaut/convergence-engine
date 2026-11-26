@@ -1,0 +1,120 @@
+{
+  "apiVersion": "batch/v1",
+  "kind": "Job",
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/managed-by": "convergence-engine",
+      "app.kubernetes.io/name": "pubdeploy-executor",
+      "convergence.sustenaut.eu/run": "run-<id>"
+    },
+    "name": "run-<id>",
+    "namespace": "notifier"
+  },
+  "spec": {
+    "activeDeadlineSeconds": 1320,
+    "backoffLimit": 0,
+    "template": {
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/managed-by": "convergence-engine",
+          "app.kubernetes.io/name": "pubdeploy-executor",
+          "convergence.sustenaut.eu/run": "run-<id>"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\ngit init -q repo\ncd repo\ngit remote add origin \"https://github.com/$REPOSITORY.git\"\nset --\nif [ -n \"${GITHUB_TOKEN:-}\" ]; then\n  set -- -c \"http.https://github.com/.extraheader=Authorization: Basic $(printf 'x-access-token:%s' \"$GITHUB_TOKEN\" | base64 -w0)\"\nfi\ngit \"$@\" fetch -q --depth 1 --no-tags origin \"$COMMIT\"\ngit checkout -q --detach FETCH_HEAD\nexec ./pubdeploy executor --engine \"$ENGINE\" --run \"$RUN\"\n"
+            ],
+            "env": [
+              {
+                "name": "REPOSITORY",
+                "value": "Sustenaut/notifier"
+              },
+              {
+                "name": "COMMIT",
+                "value": "cccccccccccccccccccccccccccccccccccccccc"
+              },
+              {
+                "name": "ENGINE",
+                "value": "https://convergence.example"
+              },
+              {
+                "name": "RUN",
+                "value": "<id>"
+              },
+              {
+                "name": "HOME",
+                "value": "/work/home"
+              },
+              {
+                "name": "PUBDEPLOY_RUN_TOKEN",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "token",
+                    "name": "run-<id>"
+                  }
+                }
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "pubdeploy-executor",
+                  "optional": true
+                }
+              }
+            ],
+            "image": "ghcr.io/sustenaut/convergence-executor:1",
+            "name": "executor",
+            "resources": {
+              "limits": {
+                "memory": "1Gi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "256Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              }
+            },
+            "volumeMounts": [
+              {
+                "mountPath": "/work",
+                "name": "work"
+              }
+            ],
+            "workingDir": "/work"
+          }
+        ],
+        "restartPolicy": "Never",
+        "securityContext": {
+          "fsGroup": 1000,
+          "runAsGroup": 1000,
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "serviceAccountName": "pubdeploy-executor",
+        "volumes": [
+          {
+            "emptyDir": {},
+            "name": "work"
+          }
+        ]
+      }
+    },
+    "ttlSecondsAfterFinished": 86400
+  }
+}

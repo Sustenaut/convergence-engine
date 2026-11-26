@@ -164,6 +164,10 @@ After(async () => {
     });
   });
 
+  Given("the run is walked by a Job at commit {string} in the image {string}", (world: World, commit: string, image: string) => {
+    world.run = { ...world.run, commit, image };
+  });
+
   Given("a viewer who may not act", (world: World) => {
     world.mayAct = false;
   });

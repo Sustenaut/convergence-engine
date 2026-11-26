@@ -1,0 +1,43 @@
+# The thin image a live run's Job walks in (executor/Dockerfile): built and checked on every
+# pull request that changes it, and on a push to main pushed as
+# ghcr.io/sustenaut/convergence-executor:<commit>, the tag CONVERGENCE_IMAGE names.
+name: executor-image
+
+on:
+  pull_request:
+    paths: [executor/**, .github/workflows/executor-image.yml]
+  push:
+    branches: [main]
+    paths: [executor/**, .github/workflows/executor-image.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: executor image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/sustenaut/convergence-executor:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Build the image
+        run: docker build -f executor/Dockerfile -t "$IMAGE" .
+      - name: Check the image
+        # It starts as its own user, with every tool a service's walk runs.
+        run: |
+          docker run --rm "$IMAGE" sh -c 'test "$(id -u)" = 1000'
+          docker run --rm "$IMAGE" sh -c 'python3 --version && uv --version && git --version && kubectl version --client && kustomize version && gh --version && bws --version && terraform version && psql --version && dig -v'
+      - name: Push the image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push "$IMAGE"

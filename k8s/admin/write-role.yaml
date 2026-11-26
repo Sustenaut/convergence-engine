@@ -2,7 +2,8 @@
 # convergence/app: a Secret made from Bitwarden (pubsec's k8s.secret), the restart of
 # the Deployments that read it, a Job from a CronJob (k8s.cronjob, service.health), and
 # a one-off Job (pubdeploy's k8s.job-once), which a rerun of a failed one deletes first.
-# Nothing else: no other delete, no exec, no RBAC (so no escalate or bind), no namespaces
+# With the Job executor (jobs.py), a live run's Job and the Secret of its token, in the
+# service's namespace: the same create on jobs and secrets. Nothing else: no other delete, no exec, no RBAC (so no escalate or bind), no namespaces
 # (k8s.namespace stays an admin's step), and no Secret read beyond secret-readers.yaml.
 # Rounds use the same identity, but run `pubdeploy check`, which writes nothing.
 # Applied by the deploy walk over the admin channel (pubrules.json's k8s.manifests).

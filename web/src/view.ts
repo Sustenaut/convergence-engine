@@ -39,6 +39,8 @@ export type Run = {
   needs: Record<string, Need>;
   journal: Event[];
   github_run_url: string;
+  image?: string;
+  commit?: string; // the service's commit a Job walks
   expires_at: string;
   stopping?: boolean;
   poll_ms: number;
