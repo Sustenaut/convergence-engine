@@ -68,6 +68,10 @@ spec:
             - --skip-auth-route=GET=^/healthz$
             - --skip-auth-route=POST=^/requests$
             - --skip-auth-route=GET=^/requests/[0-9A-Za-z-]+$
+            # A live run's remote executor (pubdeploy executor, in the run's Job): the run's own
+            # bearer token, which the engine checks; it reads no X-Forwarded-* header there.
+            - --skip-auth-route=GET=^/runs/[0-9A-Za-z-]+/executor$
+            - --skip-auth-route=POST=^/runs/[0-9A-Za-z-]+/events$
             - --silence-ping-logging=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID

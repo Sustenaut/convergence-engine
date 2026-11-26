@@ -76,6 +76,7 @@ Feature: Live runs, need by need
     And cancelling "k8s.secret:x" typing "k8s.secret:x" is refused with 404
     When the person cancels "pg.database:c" typing "pg.database:c"
     Then "pg.database:c" is "stopped", saying "cancelled"
+    And the run, read with its token, lists "pg.database:c" as cancelled
     And the journal says "cancelled, warned: it migrates the database", by the person
     When the fulfil of "k8s.secret:s" is let go
     Then the run ends "failed" with "k8s.secret:s" ready, "pg.database:c" stopped
@@ -104,6 +105,24 @@ Feature: Live runs, need by need
     And an event out of its need's order is refused with 409
     And an event without the run's token is refused with 403
     And an event that names no need is refused with 400
+
+  Scenario: A remote executor reads its run with the run's token, and only with it
+    Given the live needs "k8s.secret:a" missing
+    When a GitHub run asks for a live fulfil
+    Then the run read with its token answers its needs as JSON
+    And the run read with another token is refused with 403
+
+  Scenario: A remote executor's exit ends the run: what it left walking fails, what waited stops
+    Given the live needs "k8s.secret:a" missing, "k8s.secret:b" missing after "k8s.secret:a"
+    And every fulfil waits until it is let go
+    When a GitHub run asks for a live fulfil
+    And the person approves the run
+    And the needs "k8s.secret:a" are fulfilling
+    And the run's executor posts its exit 1
+    Then the run ends "failed" with "k8s.secret:a" failed, "k8s.secret:b" stopped
+    And "k8s.secret:a" is "failed", saying "executor lost: it exited (1)"
+    And the journal says "exit 1: lost", by the executor
+    And the run's executor posting its exit again changes nothing
 
   Scenario: A new pod replays the runs: one awaiting waits on, one walking ends with its executor
     Given the live needs "k8s.secret:a" missing, "k8s.secret:b" missing

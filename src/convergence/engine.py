@@ -121,7 +121,16 @@ class Engine:
     def listing(self) -> bool:
         """The services and their deploy units, read from the state repositories and each
         service's pubrules.json, walking nothing: what a new pod shows until its first round.
-        False, said in the problem, when they could not be read."""
+        False, said in the problem, when they could not be read, or a round was running (which
+        lists them itself): it holds the round's lock, so the two never write the list at once."""
+        if not self._running.acquire(blocking=False):
+            return False
+        try:
+            return self._listing()
+        finally:
+            self._running.release()
+
+    def _listing(self) -> bool:
         try:
             credentials = self.credentials()
             listed = self.services(credentials.github_token)

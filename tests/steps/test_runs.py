@@ -976,6 +976,52 @@ def needs_read(live: Live, listed: str) -> None:
     assert got == listed
 
 
+def _read_as_executor(live: Live, token: str):
+    return live.world.client.get(f"/runs/{live.run.id}/executor", headers={"Authorization": f"Bearer {token}"})
+
+
+@then("the run read with its token answers its needs as JSON")
+def read_with_token(live: Live) -> None:
+    answer = _read_as_executor(live, live.run.token)
+    assert answer.status_code == 200 and answer.headers["content-type"].startswith("application/json")
+    data = answer.json()
+    assert set(data["needs"]) == set(live.run.needs) and data["cancelled"] == []
+    assert live.run.token not in answer.text
+
+
+@then(parsers.parse("the run read with another token is refused with {status:d}"))
+def read_other_token(live: Live, status: int) -> None:
+    answer = _read_as_executor(live, "another")
+    assert answer.status_code == status and answer.json() == {"refused": "not-this-runs-executor"}
+
+
+@then(parsers.parse('the run, read with its token, lists "{need}" as cancelled'))
+def lists_cancelled(live: Live, need: str) -> None:
+    assert _read_as_executor(live, live.run.token).json()["cancelled"] == [need]
+
+
+@when(parsers.parse("the run's executor posts its exit {code:d}"))
+def posts_exit(live: Live, code: int) -> None:
+    answer = _event(live, {"executor_exit": code, "result": "lost"})
+    assert answer.status_code == 200, answer.text
+
+
+@then(parsers.parse('the journal says "{said}", by the executor'))
+def journal_says_executor(live: Live, said: str) -> None:
+    assert any(said in (e.get("result") or "") and e["by"] == "executor" for e in live.run.journal), live.run.journal
+
+
+@then("the run's executor posting its exit again changes nothing")
+def exit_again(live: Live) -> None:
+    states = {n: x.state for n, x in live.run.needs.items()}
+    assert _event(live, {"executor_exit": 0}).status_code == 200
+    for gate in live.spawn.gates.values():
+        gate.set()  # the engine's own executor, still walking: it finds the run ended
+    live.runs.executor.wait()
+    assert live.run.state == "failed" and {n: x.state for n, x in live.run.needs.items()} == states
+    assert [e["to"] for e in live.run.journal].count("failed") == 2  # a's move, and the run's end, once
+
+
 def _poll_by(live: Live, who: str) -> list[dict]:
     live.world.approvals.wait()
     answer = live.world.client.get(f"/runs/{live.run.id}?since=0", headers=person(who))
