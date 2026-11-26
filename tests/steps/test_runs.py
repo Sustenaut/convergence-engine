@@ -1020,3 +1020,28 @@ def exit_again(live: Live) -> None:
     live.runs.executor.wait()
     assert live.run.state == "failed" and {n: x.state for n, x in live.run.needs.items()} == states
     assert [e["to"] for e in live.run.journal].count("failed") == 2  # a's move, and the run's end, once
+
+
+def _poll_by(live: Live, who: str) -> list[dict]:
+    live.world.approvals.wait()
+    answer = live.world.client.get(f"/runs/{live.run.id}?since=0", headers=person(who))
+    return answer.json()["journal"]
+
+
+@then(parsers.parse('the run\'s poll, for the person who approved it, says the approval was by "{by}"'))
+def approved_by_viewer(live: Live, by: str) -> None:
+    journal = _poll_by(live, WHO)
+    assert any(e["to"] == "approved" and e["by"] == by for e in journal), journal
+
+
+@then(parsers.parse('the run\'s poll, for another person, says the approval was by "{by}"'))
+def approved_by_other(live: Live, by: str) -> None:
+    journal = _poll_by(live, "other@example.org")
+    assert any(e["to"] == "approved" and e["by"] == by for e in journal), journal
+
+
+@then('no poll names an email or "[someone]" as who acted')
+def no_email_actor(live: Live) -> None:
+    for who in (WHO, "other@example.org"):
+        for e in _poll_by(live, who):
+            assert "@" not in e["by"] and "[someone]" not in e["by"], e

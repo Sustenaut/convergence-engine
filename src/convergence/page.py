@@ -554,7 +554,7 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
     def run_state(id_: str, request: Request, since: int | None = None) -> Response:
         """The run: JSON for a poll (`since`, or Accept: application/json), else its page."""
         run = run_of(id_)
-        view = runs.view(run, since or 0)
+        view = runs.view(run, since or 0, person(request))
         if since is not None or "application/json" in request.headers.get("accept", ""):
             headers = {**HEADERS, "Cache-Control": "private, max-age=3600"} if run.ended else HEADERS
             return JSONResponse(view, headers=headers)
@@ -574,7 +574,7 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
                                          body["mode"], body.get("modes") or {})
         except Refused as e:
             return refusal(e)
-        return JSONResponse(runs.view(runs.runs[taken.id]), status_code=201,
+        return JSONResponse(runs.view(runs.runs[taken.id], viewer=actor), status_code=201,
                             headers={**HEADERS, "Location": f"/runs/{taken.id}"})
 
     @app.post("/runs/{id_}/approve")
@@ -586,20 +586,20 @@ def create_app(engine: Engine, journals: Journals, approvals: Approvals, callers
         refused = approvals.decide(run.request_id, actor, True)
         if refused:
             return JSONResponse({"refused": refused}, status_code=409, headers=HEADERS)
-        return JSONResponse(runs.view(run), headers=HEADERS)
+        return JSONResponse(runs.view(run, viewer=actor), headers=HEADERS)
 
     @app.post("/runs/{id_}/stop")
     def stop_run(id_: str, request: Request):
         actor, run = actor_of(request), run_of(id_)
         if run.ended:
             return Response(status_code=204, headers=HEADERS)
-        return answered(lambda: (runs.stop(run, actor), runs.view(run))[1])
+        return answered(lambda: (runs.stop(run, actor), runs.view(run, viewer=actor))[1])
 
     @app.post("/runs/{id_}/needs/{name}/cancel")
     async def cancel_need(id_: str, name: str, request: Request) -> JSONResponse:
         actor, run = actor_of(request), run_of(id_)
         body = await json_of(request)
-        return answered(lambda: (runs.cancel(run, name, body, actor), runs.view(run))[1])
+        return answered(lambda: (runs.cancel(run, name, body, actor), runs.view(run, viewer=actor))[1])
 
     @app.post("/runs/{id_}/needs/{name}/mode")
     async def need_mode(id_: str, name: str, request: Request) -> JSONResponse:

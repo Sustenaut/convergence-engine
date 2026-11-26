@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 authors = [{ name = "David Schryer", email = "schryer@gmail.com" }]
 dependencies = [
   "integrations[github-app,storage-sink] @ https://github.com/Sustenaut/integrations/releases/download/v0.14.1/integrations-0.14.1-py3-none-any.whl",
-  "pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl",
+  "pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl",
   "fastapi",
   "uvicorn",
 ]
