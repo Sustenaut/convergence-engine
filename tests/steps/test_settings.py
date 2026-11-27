@@ -10,7 +10,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from pytest_bdd import given, parsers, scenarios, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from convergence.__main__ import main
 from convergence.config import settings
@@ -85,3 +85,18 @@ def pointed(ctx) -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     ctx.attempt(lambda: module.mirrored(ctx.lock))
+
+
+ADMIN = Path(__file__).parent.parent.parent / "k8s" / "admin"
+
+
+@when("the repository's k8s/admin files are read")
+def admin_files(ctx) -> None:
+    ctx.admin = {p.name: p.read_text(encoding="utf-8") for p in ADMIN.glob("*.yaml")}
+
+
+@then("executor-accounts.yaml is what executor-accounts makes of secret-readers.yaml")
+def executor_accounts_file(ctx) -> None:
+    from convergence.readers import executors  # noqa: PLC0415
+    assert ctx.admin["executor-accounts.yaml"] == executors(ctx.admin["secret-readers.yaml"])
+    assert "namespace: notifier" in ctx.admin["executor-accounts.yaml"]
